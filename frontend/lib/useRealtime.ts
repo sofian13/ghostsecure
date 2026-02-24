@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { getSupabaseClient } from '@/lib/supabase';
+import type { Session } from '@/types';
 
 type MessageRow = {
   id: string;
@@ -14,12 +15,14 @@ type MessageRow = {
   expires_at: string | null;
 };
 
-export function useRealtime(userId: string | null, onMessage: (payload: unknown) => void): void {
+export function useRealtime(session: Session | null, onMessage: (payload: unknown) => void): void {
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
 
   useEffect(() => {
+    const userId = session?.userId ?? null;
     if (!userId) return;
+
     const supabase = getSupabaseClient();
     const channel = supabase
       .channel(`messages:${userId}`)
@@ -41,8 +44,8 @@ export function useRealtime(userId: string | null, onMessage: (payload: unknown)
               iv: row.iv,
               wrappedKeys,
               createdAt: row.created_at,
-              expiresAt: row.expires_at
-            }
+              expiresAt: row.expires_at,
+            },
           });
         }
       )
@@ -51,5 +54,5 @@ export function useRealtime(userId: string | null, onMessage: (payload: unknown)
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [userId]);
+  }, [session?.userId]);
 }

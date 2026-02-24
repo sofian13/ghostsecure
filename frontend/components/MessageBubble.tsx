@@ -22,7 +22,7 @@ export default function MessageBubble({ text, mine, expiresAt }: Props) {
   }, [expiresAt]);
 
   if (isExpired) {
-    return <div className={`message-bubble ${mine ? 'mine' : 'peer'}`}>[message supprimé]</div>;
+    return <div className={`message-bubble ${mine ? 'mine' : 'peer'}`}>[message supprime]</div>;
   }
 
   return (
@@ -32,7 +32,7 @@ export default function MessageBubble({ text, mine, expiresAt }: Props) {
       onClick={() => setRevealed((v) => !v)}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {revealed ? text : 'tap to reveal'}
+      {revealed ? text : 'cliquer pour afficher'}
     </button>
   );
 }

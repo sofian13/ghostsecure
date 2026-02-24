@@ -22,7 +22,7 @@ function toMessage(row: MessageRow): EncryptedMessage {
     iv: row.iv,
     wrappedKeys: row.wrapped_keys ?? {},
     createdAt: row.created_at,
-    expiresAt: row.expires_at
+    expiresAt: row.expires_at,
   };
 }
 
@@ -39,30 +39,43 @@ async function requireMembership(userId: string, conversationId: string): Promis
   if (!data) throw new Error('Forbidden');
 }
 
-export async function registerAnonymous(publicKey: string, clientGeneratedUserId: string): Promise<Session> {
+function toSession(userId: string): Session {
+  const now = new Date().toISOString();
+  return {
+    userId,
+    token: userId,
+    issuedAt: now,
+    expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
+  };
+}
+
+export async function registerUser(publicKey: string, userId: string): Promise<Session> {
   const supabase = getSupabaseClient();
   const now = new Date().toISOString();
 
   const { error } = await supabase.from('app_user').upsert(
     {
-      id: clientGeneratedUserId,
+      id: userId,
       public_key: publicKey,
-      created_at: now
+      created_at: now,
     },
     { onConflict: 'id' }
   );
   if (error) throw new Error(`Register failed: ${error.message}`);
 
-  return {
-    userId: clientGeneratedUserId,
-    token: clientGeneratedUserId,
-    issuedAt: now,
-    expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString()
-  };
+  return toSession(userId);
 }
 
-export async function registerUser(publicKey: string, clientGeneratedUserId: string): Promise<Session> {
-  return registerAnonymous(publicKey, clientGeneratedUserId);
+export async function loginUser(userId: string, publicKey?: string): Promise<Session> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from('app_user').select('id').eq('id', userId).maybeSingle();
+  if (error) throw new Error(`Login failed: ${error.message}`);
+  if (!data) throw new Error('Invalid credentials');
+  if (publicKey) {
+    const { error: updateError } = await supabase.from('app_user').update({ public_key: publicKey }).eq('id', userId);
+    if (updateError) throw new Error(`Login failed: ${updateError.message}`);
+  }
+  return toSession(userId);
 }
 
 export async function fetchConversations(session: Session): Promise<Conversation[]> {
@@ -125,7 +138,7 @@ export async function fetchConversations(session: Session): Promise<Conversation
       id: conversationId,
       peerId,
       peerPublicKey: peer.public_key,
-      updatedAt: updatedByConversation.get(conversationId) ?? new Date().toISOString()
+      updatedAt: updatedByConversation.get(conversationId) ?? new Date().toISOString(),
     });
   }
 
@@ -166,7 +179,7 @@ export async function createConversation(session: Session, peerUserId: string): 
         id: conversationId,
         peerId: peerUserId,
         peerPublicKey: peer.public_key,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       };
     }
   }
@@ -179,7 +192,7 @@ export async function createConversation(session: Session, peerUserId: string): 
 
   const { error: membersError } = await supabase.from('conversation_member').insert([
     { conversation_id: conversationId, user_id: me },
-    { conversation_id: conversationId, user_id: peerUserId }
+    { conversation_id: conversationId, user_id: peerUserId },
   ]);
   if (membersError) throw new Error(`Create conversation failed: ${membersError.message}`);
 
@@ -187,7 +200,7 @@ export async function createConversation(session: Session, peerUserId: string): 
     id: conversationId,
     peerId: peerUserId,
     peerPublicKey: peer.public_key,
-    updatedAt: now
+    updatedAt: now,
   };
 }
 
@@ -212,7 +225,7 @@ export async function fetchConversationDetail(session: Session, conversationId: 
 
   const participants: UserProfile[] = ((users ?? []) as UserRow[]).map((u) => ({
     id: u.id,
-    publicKey: u.public_key
+    publicKey: u.public_key,
   }));
 
   return { id: conversationId, participants };
@@ -259,7 +272,7 @@ export async function sendMessage(
     iv: payload.iv,
     wrapped_keys: payload.wrappedKeys,
     created_at: now.toISOString(),
-    expires_at: expiresAt
+    expires_at: expiresAt,
   };
 
   const { data, error } = await supabase

@@ -64,8 +64,8 @@ export default function CallPage() {
               payload: {
                 fromUserId: userId,
                 targetUserId: msg.fromUserId,
-                payload: { sdp: answer }
-              }
+                payload: { sdp: answer },
+              },
             });
           }
         }
@@ -129,7 +129,7 @@ export default function CallPage() {
     }
 
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
 
     outbound.getTracks().forEach((track) => pc.addTrack(track, outbound));
@@ -143,8 +143,8 @@ export default function CallPage() {
         payload: {
           fromUserId: userId,
           targetUserId: target,
-          payload: { candidate: event.candidate.toJSON() }
-        }
+          payload: { candidate: event.candidate.toJSON() },
+        },
       });
     };
 
@@ -170,8 +170,8 @@ export default function CallPage() {
       payload: {
         fromUserId: userId,
         targetUserId: targetId.trim(),
-        payload: { sdp: offer }
-      }
+        payload: { sdp: offer },
+      },
     });
   };
 
@@ -191,25 +191,27 @@ export default function CallPage() {
 
   return (
     <SecurityShell userId={userId}>
-      <main className="call-screen">
+      <main className="glass-card call-screen">
         <h1>Ghost Secure Call</h1>
-        <p>WebRTC audio E2EE (DTLS-SRTP) + mode voix fantome.</p>
+        <p className="muted-text">WebRTC audio E2EE (DTLS-SRTP) + mode voix fantome.</p>
         <input
-          className="ghost-input"
+          className="glass-input"
           value={targetId}
           onChange={(e) => setTargetId(e.target.value)}
           placeholder="ID utilisateur cible"
         />
         <div className="row">
-          <button className="ghost-btn" type="button" onClick={startCall}>Demarrer appel</button>
-          <button className="ghost-btn muted" type="button" onClick={endCall}>Terminer</button>
-          <button className="ghost-btn muted" type="button" onClick={() => setVoiceFx((v) => !v)}>
+          <button className="glass-btn primary" type="button" onClick={startCall}>Demarrer appel</button>
+          <button className="glass-btn soft" type="button" onClick={endCall}>Terminer</button>
+          <button className="glass-btn soft" type="button" onClick={() => setVoiceFx((v) => !v)}>
             {voiceFx ? 'Voice FX Off' : 'Voice FX On'}
           </button>
-          <button className="ghost-btn muted" type="button" onClick={() => router.push('/chat')}>Retour chat</button>
+          <button className="glass-btn soft" type="button" onClick={() => router.push('/chat')}>Retour chat</button>
         </div>
         <p>{voiceFx ? 'Mode voix fantome actif sur le flux sortant' : 'Mode voix normale'}</p>
-        <p className={connected ? 'ok-text' : ''}>{connected ? 'Canal audio securise actif' : 'En attente de connexion...'}</p>
+        <p className={connected ? 'ok-text' : 'muted-text'}>
+          {connected ? 'Canal audio securise actif' : 'En attente de connexion...'}
+        </p>
       </main>
     </SecurityShell>
   );

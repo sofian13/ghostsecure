@@ -17,9 +17,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      APP_ENV: dev
-      APP_SECRET: replace_this_secret
-      DATABASE_URL: postgresql://ghost:ghost@postgres:5432/ghost_secure?serverVersion=16&charset=utf8
+      APP_ENV: ${APP_ENV:-dev}
+      APP_SECRET: ${APP_SECRET:-replace_this_secret}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ghost:ghost@postgres:5432/ghost_secure?serverVersion=16&charset=utf8}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-http://localhost:3000,https://ghostsecure.vercel.app}
     command: sh -c "php bin/console doctrine:migrations:migrate --no-interaction && php -S 0.0.0.0:8000 -t public"
 
   ws:
@@ -30,9 +31,10 @@ services:
     ports:
       - "8081:8081"
     environment:
-      APP_ENV: dev
-      APP_SECRET: replace_this_secret
-      DATABASE_URL: postgresql://ghost:ghost@postgres:5432/ghost_secure?serverVersion=16&charset=utf8
+      APP_ENV: ${APP_ENV:-dev}
+      APP_SECRET: ${APP_SECRET:-replace_this_secret}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ghost:ghost@postgres:5432/ghost_secure?serverVersion=16&charset=utf8}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-http://localhost:3000,https://ghostsecure.vercel.app}
     command: php bin/console app:ws-server
 
   frontend:
@@ -43,8 +45,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-      NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8081
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+      NEXT_PUBLIC_WS_BASE_URL: ${NEXT_PUBLIC_WS_BASE_URL:-ws://localhost:8081}
 
   adminer:
     image: adminer

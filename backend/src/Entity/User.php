@@ -15,6 +15,9 @@ class User
     #[ORM\Column(type: 'text')]
     private string $publicKey;
 
+    #[ORM\Column(type: 'string', length: 255, nullable: true)]
+    private ?string $secretHash = null;
+
     #[ORM\Column(type: 'datetime_immutable')]
     private \DateTimeImmutable $createdAt;
 
@@ -38,5 +41,15 @@ class User
     public function setPublicKey(string $publicKey): void
     {
         $this->publicKey = $publicKey;
+    }
+
+    public function getSecretHash(): ?string
+    {
+        return $this->secretHash;
+    }
+
+    public function setSecretHash(string $secretHash): void
+    {
+        $this->secretHash = $secretHash;
     }
 }

@@ -32,20 +32,33 @@ class AuthController
         }
 
         $publicKey = trim((string) ($payload['publicKey'] ?? ''));
-        $clientGeneratedUserId = trim((string) ($payload['clientGeneratedUserId'] ?? ''));
+        $userId = trim((string) ($payload['userId'] ?? ''));
+        $secret = (string) ($payload['secret'] ?? '');
 
-        if ($publicKey === '' || $clientGeneratedUserId === '') {
-            return $this->json->error('publicKey and clientGeneratedUserId are required.', 422);
+        if ($publicKey === '' || $userId === '' || $secret === '') {
+            return $this->json->error('publicKey, userId and secret are required.', 422);
         }
 
-        $existing = $this->em->getRepository(User::class)->find($clientGeneratedUserId);
+        if (!preg_match('/^[a-z0-9_-]{3,24}$/', $userId)) {
+            return $this->json->error('userId format is invalid.', 422);
+        }
+        if (strlen($secret) < 6) {
+            return $this->json->error('secret must contain at least 6 characters.', 422);
+        }
+
+        $existing = $this->em->getRepository(User::class)->find($userId);
         if ($existing instanceof User) {
+            $hash = $existing->getSecretHash();
+            if (is_string($hash) && $hash !== '' && !password_verify($secret, $hash)) {
+                return $this->json->error('User already exists.', 409);
+            }
             $user = $existing;
             $user->setPublicKey($publicKey);
         } else {
-            $user = new User($clientGeneratedUserId, $publicKey);
+            $user = new User($userId, $publicKey);
             $this->em->persist($user);
         }
+        $user->setSecretHash(password_hash($secret, PASSWORD_DEFAULT));
 
         $this->em->flush();
         $token = $this->auth->issueToken($user);
@@ -53,6 +66,51 @@ class AuthController
         return $this->json->ok([
             'userId' => $user->getId(),
             'token' => $token,
+            'publicKey' => $user->getPublicKey(),
         ], 201);
+    }
+
+    #[Route('/auth/login', name: 'api_auth_login', methods: ['POST', 'OPTIONS'])]
+    public function login(Request $request)
+    {
+        if ($request->isMethod('OPTIONS')) {
+            return $this->json->ok(['ok' => true]);
+        }
+
+        $payload = json_decode($request->getContent(), true);
+        if (!is_array($payload)) {
+            return $this->json->error('Invalid JSON body.', 400);
+        }
+
+        $userId = trim((string) ($payload['userId'] ?? ''));
+        $secret = (string) ($payload['secret'] ?? '');
+        $publicKey = trim((string) ($payload['publicKey'] ?? ''));
+
+        if ($userId === '' || $secret === '') {
+            return $this->json->error('userId and secret are required.', 422);
+        }
+
+        $user = $this->em->getRepository(User::class)->find($userId);
+        if (!$user instanceof User) {
+            return $this->json->error('Invalid credentials.', 401);
+        }
+
+        $hash = $user->getSecretHash();
+        if (!is_string($hash) || $hash === '' || !password_verify($secret, $hash)) {
+            return $this->json->error('Invalid credentials.', 401);
+        }
+
+        if ($publicKey !== '') {
+            $user->setPublicKey($publicKey);
+            $this->em->flush();
+        }
+
+        $token = $this->auth->issueToken($user);
+
+        return $this->json->ok([
+            'userId' => $user->getId(),
+            'token' => $token,
+            'publicKey' => $user->getPublicKey(),
+        ]);
     }
 }

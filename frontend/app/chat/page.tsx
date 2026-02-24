@@ -26,7 +26,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Decrypted[]>([]);
   const [input, setInput] = useState('');
   const [peerUserId, setPeerUserId] = useState('');
-  const [ephemeralSeconds, setEphemeralSeconds] = useState(60);
+  const [ephemeralSeconds, setEphemeralSeconds] = useState(300);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -46,9 +46,7 @@ export default function ChatPage() {
   const loadConversations = async (s: Session) => {
     const data = await fetchConversations(s);
     setConversations(data);
-    if (!activeId && data.length > 0) {
-      setActiveId(data[0].id);
-    }
+    if (!activeId && data.length > 0) setActiveId(data[0].id);
   };
 
   const loadMessages = async (s: Session, conversationId: string) => {
@@ -67,17 +65,23 @@ export default function ChatPage() {
     loadMessages(session, activeId).catch((e) => setError(normalizeError(e, 'Erreur chargement messages')));
   }, [session, activeId]);
 
-  useRealtime(session?.userId ?? null, async (payload) => {
+  useEffect(() => {
+    if (!session || !activeId) return;
+    const id = window.setInterval(() => {
+      void loadMessages(session, activeId).catch(() => null);
+    }, 3500);
+    return () => window.clearInterval(id);
+  }, [session, activeId]);
+
+  useRealtime(session, async (payload) => {
     const event = payload as { type?: string; conversationId?: string; message?: EncryptedMessage };
     if (!session) return;
-    if (event.type === 'new_message' && event.message) {
-      await loadConversations(session);
-      if (event.conversationId === activeId) {
-        const decrypted = await decryptOne(session.userId, event.message);
-        if (decrypted) {
-          setMessages((prev) => [...prev, decrypted]);
-        }
-      }
+    if (event.type !== 'new_message' || !event.message) return;
+
+    await loadConversations(session);
+    if (event.conversationId === activeId) {
+      const decrypted = await decryptOne(session.userId, event.message);
+      if (decrypted) setMessages((prev) => [...prev, decrypted]);
     }
   });
 
@@ -99,15 +103,18 @@ export default function ChatPage() {
     if (!session || !activeId || !input.trim()) return;
     try {
       const detail = await fetchConversationDetail(session, activeId);
-      const encrypted = await encryptForParticipants(input.trim(), detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey })));
+      const encrypted = await encryptForParticipants(
+        input.trim(),
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
+      );
       await sendMessage(session, activeId, {
         ...encrypted,
-        expiresInSeconds: ephemeralSeconds
+        expiresInSeconds: ephemeralSeconds,
       });
       setInput('');
       await loadMessages(session, activeId);
     } catch (err) {
-      setError(normalizeError(err, 'Erreur envoi'));
+      setError(normalizeError(err, 'Erreur envoi message'));
     }
   };
 
@@ -116,28 +123,30 @@ export default function ChatPage() {
     router.replace('/login');
   };
 
-  if (!session) {
-    return <main className="centered">Loading...</main>;
-  }
+  if (!session) return <main className="centered">Chargement...</main>;
 
   return (
     <SecurityShell userId={session.userId}>
-      <main className="chat-layout" onContextMenu={(e) => e.preventDefault()}>
-        <aside className="sidebar">
-          <div className="sidebar-title">
+      <main className="chat-shell">
+        <aside className="glass-card sidebar-v2">
+          <div className="sidebar-top">
             <h1>Ghost Secure</h1>
-            <span className="status-dot" title="Realtime actif" />
+            <p className="user-id">Session: {session.userId}</p>
           </div>
-          <p className="user-id">ID: {session.userId}</p>
-          <form onSubmit={onCreateConversation} className="inline-form">
-            <input
-              value={peerUserId}
-              onChange={(e) => setPeerUserId(e.target.value)}
-              placeholder="ID destinataire"
-              className="ghost-input"
-            />
-            <button type="submit" className="ghost-btn">Ajouter</button>
+
+          <form onSubmit={onCreateConversation} className="stack-form">
+            <label className="field">
+              <span>Nouveau contact</span>
+              <input
+                value={peerUserId}
+                onChange={(e) => setPeerUserId(e.target.value)}
+                placeholder="user_id"
+                className="glass-input"
+              />
+            </label>
+            <button type="submit" className="glass-btn">Creer / ouvrir</button>
           </form>
+
           <div className="conv-list">
             {conversations.map((conv) => (
               <button
@@ -146,45 +155,55 @@ export default function ChatPage() {
                 className={`conv-item ${activeId === conv.id ? 'active' : ''}`}
                 onClick={() => setActiveId(conv.id)}
               >
-                <span>{conv.peerId.slice(0, 12)}...</span>
+                <strong>{conv.peerId}</strong>
+                <span>{new Date(conv.updatedAt).toLocaleString()}</span>
               </button>
             ))}
           </div>
+
           <div className="sidebar-actions">
-            <button className="ghost-btn muted" type="button" onClick={() => router.push('/call')}>Audio</button>
-            <button className="ghost-btn muted" type="button" onClick={() => router.push('/settings')}>Security</button>
-            <button className="ghost-btn danger" type="button" onClick={logout}>Logout</button>
+            <button className="glass-btn soft" type="button" onClick={() => router.push('/call')}>Appel</button>
+            <button className="glass-btn soft" type="button" onClick={() => router.push('/settings')}>Securite</button>
+            <button className="glass-btn danger" type="button" onClick={logout}>Logout</button>
           </div>
         </aside>
 
-        <section className="chat-panel">
-          <header className="panel-head">
-            <h2>{activeConversation ? `Conversation avec ${activeConversation.peerId}` : 'Aucune conversation'}</h2>
-            <span className="panel-pill">SECURE CHANNEL</span>
+        <section className="glass-card chat-main">
+          <header className="chat-head">
+            <h2>{activeConversation ? `Conversation: ${activeConversation.peerId}` : 'Aucune conversation'}</h2>
+            <span className="panel-pill">E2EE ACTIVE</span>
           </header>
+
           <div className="message-list no-select">
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} text={msg.text} mine={msg.senderId === session.userId} expiresAt={msg.expiresAt} />
+              <MessageBubble
+                key={msg.id}
+                text={msg.text}
+                mine={msg.senderId === session.userId}
+                expiresAt={msg.expiresAt}
+              />
             ))}
           </div>
-          <form className="compose" onSubmit={onSendMessage}>
+
+          <form className="compose-v2" onSubmit={onSendMessage}>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              className="ghost-input"
-              placeholder="Message chiffre..."
+              className="glass-input"
+              placeholder="Ecrire un message chiffre..."
             />
             <input
               type="number"
               min={5}
               max={86400}
-              className="ghost-input ttl"
+              className="glass-input ttl"
               value={ephemeralSeconds}
-              onChange={(e) => setEphemeralSeconds(Number(e.target.value) || 60)}
-              title="Auto suppression (s)"
+              onChange={(e) => setEphemeralSeconds(Number(e.target.value) || 300)}
+              title="Auto suppression (secondes)"
             />
-            <button type="submit" className="ghost-btn" disabled={!activeConversation}>Send</button>
+            <button type="submit" className="glass-btn primary" disabled={!activeConversation}>Envoyer</button>
           </form>
+
           {error && <p className="error-text">{error}</p>}
         </section>
       </main>
@@ -196,7 +215,7 @@ function normalizeError(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
   const message = err.message.toLowerCase();
   if (message.includes('unauthorized') || message.includes('forbidden')) return 'Session invalide. Reconnectez-vous.';
-  if (message.includes('abort')) return 'Delai depasse. Reessayez.';
+  if (message.includes('failed to fetch')) return 'Supabase indisponible. Verifiez les variables env.';
   return fallback;
 }
 
@@ -207,14 +226,14 @@ async function decryptOne(userId: string, message: EncryptedMessage): Promise<De
     const text = await decryptIncomingMessage(userId, {
       ciphertext: message.ciphertext,
       iv: message.iv,
-      wrappedKey
+      wrappedKey,
     });
     return {
       id: message.id,
       senderId: message.senderId,
       text,
       createdAt: message.createdAt,
-      expiresAt: message.expiresAt
+      expiresAt: message.expiresAt,
     };
   } catch {
     return null;

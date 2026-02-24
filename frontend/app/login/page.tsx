@@ -1,53 +1,51 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ensureIdentity } from '@/lib/crypto';
-import { registerUser } from '@/lib/api';
+import { loginUser, registerUser } from '@/lib/api';
 import { setSession } from '@/lib/session';
-import { checkSupabaseConnection, type SupabaseStatus } from '@/lib/supabase';
+
+type AuthMode = 'login' | 'register';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [handle, setHandle] = useState('');
+  const [mode, setMode] = useState<AuthMode>('login');
+  const [userIdInput, setUserIdInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatus | null>(null);
 
-  const normalizedHandle = useMemo(() => normalizeHandle(handle), [handle]);
+  const userId = useMemo(() => normalizeHandle(userIdInput), [userIdInput]);
 
-  useEffect(() => {
-    let active = true;
-    checkSupabaseConnection().then((status) => {
-      if (active) setSupabaseStatus(status);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const createIdentity = async (e: FormEvent) => {
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!normalizedHandle) {
-      setError('Entre un identifiant valide (3-24 caracteres).');
+    if (!userId) {
+      setError('Identifiant invalide. Format: 3-24 caracteres [a-z0-9_-].');
       return;
     }
 
     setLoading(true);
     setError(null);
     try {
-      const suffix = crypto.randomUUID().slice(0, 8);
-      const userId = `${normalizedHandle}-${suffix}`.slice(0, 36);
       const keys = await ensureIdentity(userId);
-      const session = await registerUser(keys.publicKey, userId);
-      setSession({
-        ...session,
-        issuedAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
-      });
+      const session =
+        mode === 'register'
+          ? await registerUser(keys.publicKey, userId)
+          : await loginUser(userId, keys.publicKey);
+
+      setSession(session);
       router.replace('/chat');
-    } catch {
-      setError("Inscription impossible pour l'instant. Reessaie.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message.toLowerCase() : '';
+      if (message.includes('invalid credentials')) {
+        setError('Identifiants invalides.');
+      } else if (message.includes('already exists')) {
+        setError('Cet identifiant existe deja. Connectez-vous.');
+      } else if (message.includes('failed to fetch')) {
+        setError('Supabase indisponible. Verifiez NEXT_PUBLIC_SUPABASE_URL et NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+      } else {
+        setError('Impossible de continuer pour le moment.');
+      }
     } finally {
       setLoading(false);
     }
@@ -55,33 +53,49 @@ export default function LoginPage() {
 
   return (
     <main className="auth-screen">
-      <div className="auth-card">
-        <h1>Ghost Secure</h1>
-        <p>Inscription instantanee. Creation en base puis connexion automatique.</p>
-        <p className="user-id">
-          Supabase: {supabaseStatus === null ? 'verification...' : supabaseStatus.message}
-        </p>
-        <div className="auth-meta">
-          <span className="auth-chip">E2EE</span>
-          <span className="auth-chip">Ephemere</span>
-          <span className="auth-chip">Anonyme</span>
+      <section className="glass-card auth-card-v2">
+        <p className="kicker">Ghost Secure</p>
+        <h1>Connexion securisee</h1>
+        <p className="muted-text">Messagerie E2EE avec session token et transport temps reel.</p>
+
+        <div className="segmented">
+          <button
+            type="button"
+            className={`segmented-btn ${mode === 'login' ? 'active' : ''}`}
+            onClick={() => setMode('login')}
+          >
+            Connexion
+          </button>
+          <button
+            type="button"
+            className={`segmented-btn ${mode === 'register' ? 'active' : ''}`}
+            onClick={() => setMode('register')}
+          >
+            Inscription
+          </button>
         </div>
-        <form onSubmit={createIdentity} className="auth-form">
-          <input
-            className="ghost-input"
-            value={handle}
-            onChange={(e) => setHandle(e.target.value)}
-            placeholder="Choisis ton identifiant (ex: phantom)"
-            maxLength={24}
-            autoFocus
-          />
-          <p className="user-id">ID final: {normalizedHandle ? `${normalizedHandle}-xxxxxxxx` : '...'}</p>
-          <button type="submit" className="ghost-btn" disabled={loading}>
-            {loading ? 'Creation...' : "S'inscrire et continuer"}
+
+        <form onSubmit={onSubmit} className="auth-form">
+          <label className="field">
+            <span>Identifiant</span>
+            <input
+              className="glass-input"
+              value={userIdInput}
+              onChange={(e) => setUserIdInput(e.target.value)}
+              placeholder="ex: phantom_01"
+              maxLength={24}
+              autoFocus
+            />
+          </label>
+
+          <p className="user-id">ID normalise: {userId || '...'}</p>
+          <button type="submit" className="glass-btn primary" disabled={loading}>
+            {loading ? 'Traitement...' : mode === 'register' ? "Creer le compte" : 'Se connecter'}
           </button>
         </form>
+
         {error && <p className="error-text">{error}</p>}
-      </div>
+      </section>
     </main>
   );
 }
