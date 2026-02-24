@@ -41,6 +41,7 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [friendStatus, setFriendStatus] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [incomingCallFrom, setIncomingCallFrom] = useState<string | null>(null);
 
   useEffect(() => {
     const s = getSession();
@@ -113,6 +114,33 @@ export default function ChatPage() {
           await loadConversations(session);
         }
       )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [session?.userId]);
+
+  useEffect(() => {
+    if (!session) return;
+    const me = session.userId.trim().toLowerCase();
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel(`call-inbox:${me}`, {
+        config: { broadcast: { ack: true, self: false } },
+      })
+      .on('broadcast', { event: 'call_signal' }, ({ payload }) => {
+        const frame = payload as {
+          action?: string;
+          fromUserId?: string;
+          targetUserId?: string;
+        };
+        if (frame.action !== 'offer') return;
+        const target = (frame.targetUserId ?? '').trim().toLowerCase();
+        const from = (frame.fromUserId ?? '').trim().toLowerCase();
+        if (!from || target !== me) return;
+        setIncomingCallFrom(from);
+      })
       .subscribe();
 
     return () => {
@@ -265,6 +293,24 @@ export default function ChatPage() {
               <span className="panel-pill">E2EE ACTIVE</span>
             </div>
           </header>
+
+          {incomingCallFrom && (
+            <div className="requests-box">
+              <p className="requests-title">Appel entrant: {incomingCallFrom}</p>
+              <div className="row">
+                <button
+                  type="button"
+                  className="glass-btn primary"
+                  onClick={() => router.push(`/call?target=${encodeURIComponent(incomingCallFrom)}`)}
+                >
+                  Repondre
+                </button>
+                <button type="button" className="glass-btn soft" onClick={() => setIncomingCallFrom(null)}>
+                  Ignorer
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="message-list no-select">
             {messages.map((msg) => (
