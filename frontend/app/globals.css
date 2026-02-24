@@ -240,6 +240,13 @@ select {
   place-items: center;
 }
 
+.icon-svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  display: block;
+}
+
 .ghost-secondary:hover,
 .ghost-primary:hover,
 .icon-btn:hover,
@@ -522,6 +529,19 @@ select {
 
 .voice-message audio {
   width: min(220px, 100%);
+}
+
+.voice-draft {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card-soft);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.voice-draft audio {
+  width: 100%;
 }
 
 .composer {

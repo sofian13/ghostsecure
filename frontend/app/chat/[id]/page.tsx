@@ -27,6 +27,10 @@ export default function ConversationPage() {
   const [incomingCallFrom, setIncomingCallFrom] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
+  const [draftVoiceUrl, setDraftVoiceUrl] = useState<string | null>(null);
+  const [draftVoiceBlob, setDraftVoiceBlob] = useState<Blob | null>(null);
+  const [draftVoiceMime, setDraftVoiceMime] = useState<string>('audio/webm');
+  const [draftVoiceDurationMs, setDraftVoiceDurationMs] = useState(0);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordStreamRef = useRef<MediaStream | null>(null);
@@ -74,6 +78,12 @@ export default function ConversationPage() {
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages.length]);
+
+  useEffect(() => {
+    return () => {
+      if (draftVoiceUrl) URL.revokeObjectURL(draftVoiceUrl);
+    };
+  }, [draftVoiceUrl]);
 
   useEffect(() => {
     if (!session) return;
@@ -174,28 +184,51 @@ export default function ConversationPage() {
         rec.stop();
       });
 
-      const detail = await fetchConversationDetail(session, conversationId);
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      let binary = '';
-      for (const b of bytes) binary += String.fromCharCode(b);
-      const payload = JSON.stringify({
-        type: 'voice',
-        mimeType: blob.type || 'audio/webm',
-        dataBase64: btoa(binary),
-        durationMs: Math.max(800, Date.now() - recordStartRef.current),
-      });
-
-      const encrypted = await encryptForParticipants(
-        payload,
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
-      );
-      await sendMessage(session, conversationId, { ...encrypted });
-      await loadMessages(session);
+      const duration = Math.max(800, Date.now() - recordStartRef.current);
+      const nextUrl = URL.createObjectURL(blob);
+      if (draftVoiceUrl) URL.revokeObjectURL(draftVoiceUrl);
+      setDraftVoiceBlob(blob);
+      setDraftVoiceMime(blob.type || 'audio/webm');
+      setDraftVoiceDurationMs(duration);
+      setDraftVoiceUrl(nextUrl);
     } catch {
       setError("Erreur d'envoi vocal");
     } finally {
       cleanupVoiceRecorder();
     }
+  };
+
+  const sendDraftVoice = async () => {
+    if (!session || !draftVoiceBlob) return;
+    try {
+      const detail = await fetchConversationDetail(session, conversationId);
+      const bytes = new Uint8Array(await draftVoiceBlob.arrayBuffer());
+      let binary = '';
+      for (const b of bytes) binary += String.fromCharCode(b);
+      const payload = JSON.stringify({
+        type: 'voice',
+        mimeType: draftVoiceMime || 'audio/webm',
+        dataBase64: btoa(binary),
+        durationMs: draftVoiceDurationMs || 1000,
+      });
+      const encrypted = await encryptForParticipants(
+        payload,
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
+      );
+      await sendMessage(session, conversationId, { ...encrypted });
+      discardDraftVoice();
+      await loadMessages(session);
+    } catch {
+      setError("Erreur d'envoi vocal");
+    }
+  };
+
+  const discardDraftVoice = () => {
+    if (draftVoiceUrl) URL.revokeObjectURL(draftVoiceUrl);
+    setDraftVoiceUrl(null);
+    setDraftVoiceBlob(null);
+    setDraftVoiceDurationMs(0);
+    setDraftVoiceMime('audio/webm');
   };
 
   const cleanupVoiceRecorder = () => {
@@ -213,7 +246,22 @@ export default function ConversationPage() {
     if (input.trim()) {
       return (
         <button type="submit" className="composer-send" aria-label="Envoyer">
-          Env
+          <SendIcon />
+        </button>
+      );
+    }
+    if (draftVoiceUrl && !recording) {
+      return (
+        <button
+          type="button"
+          className="composer-mic"
+          onClick={() => {
+            discardDraftVoice();
+            void startVoiceRecording();
+          }}
+          aria-label="Reenregistrer vocal"
+        >
+          <RedoIcon />
         </button>
       );
     }
@@ -228,12 +276,12 @@ export default function ConversationPage() {
           }
           void startVoiceRecording();
         }}
-        aria-label={recording ? 'Envoyer vocal' : 'Demarrer vocal'}
+        aria-label={recording ? 'Arreter enregistrement' : 'Demarrer vocal'}
       >
-        {recording ? 'Send' : 'Mic'}
+        {recording ? <StopIcon /> : <MicIcon />}
       </button>
     );
-  }, [input, recording, startVoiceRecording, stopVoiceRecording]);
+  }, [input, draftVoiceUrl, recording, startVoiceRecording, stopVoiceRecording]);
 
   if (!session) return <main className="centered">Chargement...</main>;
 
@@ -255,7 +303,7 @@ export default function ConversationPage() {
             onClick={() => router.push(`/call?target=${encodeURIComponent(peerId)}&autocall=1`)}
             aria-label="Appeler"
           >
-            Tel
+            <PhoneIcon />
           </button>
           <button type="button" className="icon-btn" onClick={() => router.push('/settings')} aria-label="Options">
             ...
@@ -292,6 +340,21 @@ export default function ConversationPage() {
           ))}
         </section>
 
+        {draftVoiceUrl && (
+          <section className="voice-draft">
+            <audio controls preload="metadata" src={draftVoiceUrl} />
+            <p className="muted-text">Vocal: {Math.max(1, Math.round(draftVoiceDurationMs / 1000))}s</p>
+            <div className="row">
+              <button type="button" className="ghost-secondary" onClick={discardDraftVoice}>
+                Ne pas envoyer
+              </button>
+              <button type="button" className="ghost-primary" onClick={sendDraftVoice}>
+                Envoyer le vocal
+              </button>
+            </div>
+          </section>
+        )}
+
         <form className="composer" onSubmit={sendText}>
           <button type="button" className="icon-btn composer-left" aria-label="Joindre" onClick={() => setError('Piece jointe bientot')}>
             +
@@ -327,4 +390,44 @@ function sortAndDedupe(items: DecryptedMessage[]): DecryptedMessage[] {
   const byId = new Map<string, DecryptedMessage>();
   for (const item of items) byId.set(item.id, item);
   return [...byId.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+}
+
+function MicIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3Zm-6 9a1 1 0 0 1 1 1 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V22h2a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2h2v-2.07A7 7 0 0 1 5 13a1 1 0 0 1 1-1Z" />
+    </svg>
+  );
+}
+
+function PhoneIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7.1 2.6a1.5 1.5 0 0 1 1.7.9l1.2 2.9a1.5 1.5 0 0 1-.3 1.6L8.3 9.4a13.4 13.4 0 0 0 6.3 6.3l1.4-1.4a1.5 1.5 0 0 1 1.6-.3l2.9 1.2a1.5 1.5 0 0 1 .9 1.7l-.4 2.3a1.5 1.5 0 0 1-1.5 1.3c-9.6 0-17.4-7.8-17.4-17.4a1.5 1.5 0 0 1 1.3-1.5l2.3-.4Z" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M2.3 11.1 20.9 2.3c.8-.4 1.7.3 1.5 1.2l-3.1 17.8c-.1.8-1.1 1.1-1.6.6l-4.6-4.4-3.8 3a1 1 0 0 1-1.6-.7l-.4-5.2-5-2c-.8-.3-.8-1.4 0-1.7Zm4.9.6 2.6 1.1 7.6-6.3-6.2 7.6.2 3.2 1.8-1.4a1 1 0 0 1 1.3 0l3 2.9 2.1-12.2-12.4 5.1Z" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 8h8v8H8z" />
+    </svg>
+  );
+}
+
+function RedoIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5a7 7 0 0 1 6.3 4H21a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1V6a1 1 0 1 1 2 0v1a9 9 0 1 0 2.5 7.2 1 1 0 1 1 2 .3A11 11 0 1 1 12 5Z" />
+    </svg>
+  );
 }

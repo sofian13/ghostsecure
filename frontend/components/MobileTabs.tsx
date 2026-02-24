@@ -22,12 +22,24 @@ function isActive(pathname: string, item: TabItem): boolean {
 
 function TabIcon({ kind }: { kind: TabItem['icon'] }) {
   if (kind === 'chat') {
-    return <span className="mobile-tab-glyph" aria-hidden="true">C</span>;
+    return (
+      <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v7A2.5 2.5 0 0 1 17.5 15H9l-4.2 3.4c-.33.27-.8.03-.8-.39V5.5Z" />
+      </svg>
+    );
   }
   if (kind === 'call') {
-    return <span className="mobile-tab-glyph" aria-hidden="true">A</span>;
+    return (
+      <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7.1 2.6a1.5 1.5 0 0 1 1.7.9l1.2 2.9a1.5 1.5 0 0 1-.3 1.6L8.3 9.4a13.4 13.4 0 0 0 6.3 6.3l1.4-1.4a1.5 1.5 0 0 1 1.6-.3l2.9 1.2a1.5 1.5 0 0 1 .9 1.7l-.4 2.3a1.5 1.5 0 0 1-1.5 1.3c-9.6 0-17.4-7.8-17.4-17.4a1.5 1.5 0 0 1 1.3-1.5l2.3-.4Z" />
+      </svg>
+    );
   }
-  return <span className="mobile-tab-glyph" aria-hidden="true">P</span>;
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m12 2 2.2 1.2 2.5-.3 1.3 2.1 2.3 1 .1 2.5 1.6 2-1 2.3 1 2.3-1.6 2-.1 2.5-2.3 1-1.3 2.1-2.5-.3L12 22l-2.2-1.2-2.5.3-1.3-2.1-2.3-1-.1-2.5-1.6-2 1-2.3-1-2.3 1.6-2 .1-2.5 2.3-1 1.3-2.1 2.5.3L12 2Zm0 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" />
+    </svg>
+  );
 }
 
 export default function MobileTabs() {
