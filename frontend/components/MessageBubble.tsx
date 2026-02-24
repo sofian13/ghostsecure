@@ -57,7 +57,7 @@ export default function MessageBubble({ kind, text, voice, mine, createdAt, stat
   }
 
   return (
-    <div className={`message-bubble ${mine ? 'mine' : 'peer'}`}>
+    <div className={`message-bubble ${mine ? 'mine' : 'peer'} ${kind === 'voice' ? 'voice-bubble' : ''}`}>
       {kind === 'text' && <p className="message-text">{text}</p>}
       {kind === 'voice' && voice && voiceUrl && (
         <div className="voice-message">

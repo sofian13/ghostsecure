@@ -498,6 +498,10 @@ select {
   gap: 6px;
 }
 
+.message-bubble.voice-bubble {
+  max-width: 86%;
+}
+
 .message-bubble.peer {
   background: var(--bubble-in);
   justify-self: start;
@@ -525,10 +529,13 @@ select {
 .voice-message {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .voice-message audio {
-  width: min(220px, 100%);
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .voice-draft {

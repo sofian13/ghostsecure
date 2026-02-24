@@ -177,6 +177,12 @@ export default function CallPage() {
       return;
     }
 
+    if (to === me && (row.status === 'accepted' || row.status === 'rejected' || row.status === 'ended')) {
+      if (incomingOffer?.inviteId === row.id) setIncomingOffer(null);
+      lastIncomingInviteRef.current = row.id;
+      return;
+    }
+
     if (from === me && activeCallIdRef.current === row.call_id) {
       if (row.status === 'accepted' && row.answer_sdp && pcRef.current && !pcRef.current.remoteDescription) {
         await pcRef.current.setRemoteDescription(row.answer_sdp);
@@ -429,6 +435,7 @@ export default function CallPage() {
   const acceptIncoming = async () => {
     const incoming = incomingOffer;
     if (!incoming) return;
+    lastIncomingInviteRef.current = incoming.inviteId;
     setIncomingOffer(null);
 
     const pc = await ensurePeer(incoming.fromUserId, incoming.callId);
@@ -505,7 +512,11 @@ export default function CallPage() {
 
   function applyIncomingOffer(row: InviteRow) {
     const from = normalizeUserId(row.from_user_id);
-    if (row.id === lastIncomingInviteRef.current || !from || row.status !== 'pending') return;
+    if (!from || row.status !== 'pending') return;
+    if (row.id === lastIncomingInviteRef.current) return;
+    if (incomingOffer?.inviteId === row.id) return;
+    if (activeInviteIdRef.current === row.id) return;
+    if (connected || pcRef.current) return;
     setIncomingOffer({
       inviteId: row.id,
       callId: row.call_id,
