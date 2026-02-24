@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
@@ -23,7 +23,13 @@ import type { Conversation, EncryptedMessage, Session } from '@/types';
 type Decrypted = {
   id: string;
   senderId: string;
-  text: string;
+  kind: 'text' | 'voice';
+  text?: string;
+  voice?: {
+    mimeType: string;
+    dataBase64: string;
+    durationMs: number;
+  };
   createdAt: string;
   expiresAt: string | null;
 };
@@ -42,6 +48,13 @@ export default function ChatPage() {
   const [friendStatus, setFriendStatus] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [incomingCallFrom, setIncomingCallFrom] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordingMs, setRecordingMs] = useState(0);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordStreamRef = useRef<MediaStream | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<number | null>(null);
+  const recordStartRef = useRef<number>(0);
 
   useEffect(() => {
     const s = getSession();
@@ -205,6 +218,93 @@ export default function ChatPage() {
     }
   };
 
+  const startVoiceRecording = async () => {
+    if (recording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recordStreamRef.current = stream;
+      recorderRef.current = recorder;
+      recordChunksRef.current = [];
+      recordStartRef.current = Date.now();
+      setRecordingMs(0);
+      setRecording(true);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) recordChunksRef.current.push(event.data);
+      };
+      recorder.start(250);
+
+      recordTimerRef.current = window.setInterval(() => {
+        setRecordingMs(Date.now() - recordStartRef.current);
+      }, 200);
+    } catch {
+      setError('Impossible de demarrer le micro');
+    }
+  };
+
+  const stopVoiceRecording = async () => {
+    if (!recording || !session || !activeId || !recorderRef.current) return;
+    try {
+      const blob = await new Promise<Blob>((resolve) => {
+        const rec = recorderRef.current!;
+        rec.onstop = () => {
+          resolve(new Blob(recordChunksRef.current, { type: rec.mimeType || 'audio/webm' }));
+        };
+        rec.stop();
+      });
+
+      const detail = await fetchConversationDetail(session, activeId);
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (const b of bytes) binary += String.fromCharCode(b);
+      const dataBase64 = btoa(binary);
+      const payload = JSON.stringify({
+        type: 'voice',
+        mimeType: blob.type || 'audio/webm',
+        dataBase64,
+        durationMs: Math.max(1000, Date.now() - recordStartRef.current),
+      });
+
+      const encrypted = await encryptForParticipants(
+        payload,
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
+      );
+      await sendMessage(session, activeId, {
+        ...encrypted,
+        expiresInSeconds: ephemeralSeconds,
+      });
+      await loadMessages(session, activeId);
+    } catch {
+      setError("Erreur d'envoi vocal");
+    } finally {
+      if (recordTimerRef.current) window.clearInterval(recordTimerRef.current);
+      recordTimerRef.current = null;
+      recorderRef.current = null;
+      recordChunksRef.current = [];
+      recordStreamRef.current?.getTracks().forEach((t) => t.stop());
+      recordStreamRef.current = null;
+      setRecording(false);
+      setRecordingMs(0);
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    if (!recording) return;
+    if (recordTimerRef.current) window.clearInterval(recordTimerRef.current);
+    recordTimerRef.current = null;
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    recordChunksRef.current = [];
+    recordStreamRef.current?.getTracks().forEach((t) => t.stop());
+    recordStreamRef.current = null;
+    setRecording(false);
+    setRecordingMs(0);
+  };
+
   const logout = () => {
     clearSession();
     router.replace('/login');
@@ -314,7 +414,9 @@ export default function ChatPage() {
             {messages.map((msg) => (
               <MessageBubble
                 key={msg.id}
+                kind={msg.kind}
                 text={msg.text}
+                voice={msg.voice}
                 mine={msg.senderId === session.userId}
                 expiresAt={msg.expiresAt}
               />
@@ -338,6 +440,17 @@ export default function ChatPage() {
               title="Auto suppression (secondes)"
             />
             <button type="submit" className="glass-btn primary" disabled={!activeConversation}>Envoyer</button>
+            {!recording && (
+              <button type="button" className="glass-btn soft" onClick={startVoiceRecording} disabled={!activeConversation}>
+                Vocal
+              </button>
+            )}
+            {recording && (
+              <>
+                <button type="button" className="glass-btn primary" onClick={stopVoiceRecording}>Envoyer {Math.ceil(recordingMs / 1000)}s</button>
+                <button type="button" className="glass-btn danger" onClick={cancelVoiceRecording}>Annuler</button>
+              </>
+            )}
           </form>
 
           {friendStatus && <p className="ok-text">{friendStatus}</p>}
@@ -361,15 +474,46 @@ async function decryptOne(userId: string, message: EncryptedMessage): Promise<De
   const wrappedKey = message.wrappedKeys[userId];
   if (!wrappedKey) return null;
   try {
-    const text = await decryptIncomingMessage(userId, {
+    const payload = await decryptIncomingMessage(userId, {
       ciphertext: message.ciphertext,
       iv: message.iv,
       wrappedKey,
     });
+
+    let parsed:
+      | { type: 'voice'; mimeType: string; dataBase64: string; durationMs: number }
+      | null = null;
+    try {
+      const raw = JSON.parse(payload) as {
+        type?: string;
+        mimeType?: string;
+        dataBase64?: string;
+        durationMs?: number;
+      };
+      if (raw.type === 'voice' && raw.mimeType && raw.dataBase64) {
+        parsed = {
+          type: 'voice',
+          mimeType: raw.mimeType,
+          dataBase64: raw.dataBase64,
+          durationMs: Math.max(0, Number(raw.durationMs ?? 0)),
+        };
+      }
+    } catch {
+      parsed = null;
+    }
+
     return {
       id: message.id,
       senderId: message.senderId,
-      text,
+      kind: parsed ? 'voice' : 'text',
+      text: parsed ? undefined : payload,
+      voice: parsed
+        ? {
+            mimeType: parsed.mimeType,
+            dataBase64: parsed.dataBase64,
+            durationMs: parsed.durationMs,
+          }
+        : undefined,
       createdAt: message.createdAt,
       expiresAt: message.expiresAt,
     };

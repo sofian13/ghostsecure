@@ -23,6 +23,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  -webkit-touch-callout: none;
 }
 
 body {
@@ -402,6 +403,15 @@ input {
   align-self: flex-start;
 }
 
+.voice-message {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.voice-message audio {
+  width: min(260px, 100%);
+}
+
 .compose-v2,
 .compose {
   display: grid;
@@ -419,6 +429,8 @@ input {
 
 .security-shell {
   position: relative;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .watermark {
@@ -429,6 +441,26 @@ input {
   font-size: 0.68rem;
   letter-spacing: 0.15em;
   z-index: 20;
+}
+
+.watermark-grid {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  opacity: 0.12;
+}
+
+.watermark-grid span {
+  align-self: center;
+  justify-self: center;
+  transform: rotate(-24deg);
+  color: rgba(255, 255, 255, 0.42);
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
 }
 
 .privacy-mask {
