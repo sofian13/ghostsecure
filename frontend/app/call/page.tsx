@@ -37,6 +37,7 @@ function resolveIceServers(): RTCIceServer[] {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
   ];
   const turnUrl = process.env.NEXT_PUBLIC_TURN_URL ?? '';
   const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME ?? '';
@@ -44,9 +45,10 @@ function resolveIceServers(): RTCIceServer[] {
   if (turnUrl && turnUsername && turnCredential) {
     list.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
   } else {
-    list.push({ urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' });
-    list.push({ urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' });
-    list.push({ urls: 'turns:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' });
+    list.push({ urls: 'turn:openrelay.metered.ca:80?transport=udp', username: 'openrelayproject', credential: 'openrelayproject' });
+    list.push({ urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' });
+    list.push({ urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' });
+    list.push({ urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' });
   }
   return list;
 }
@@ -217,7 +219,7 @@ export default function CallPage() {
       window.setTimeout(() => {
         pc.removeEventListener('icegatheringstatechange', onState);
         resolve();
-      }, 8000);
+      }, 14000);
     });
 
   const buildProcessedStream = async (input: MediaStream, preset: VoicePreset): Promise<MediaStream> => {
@@ -310,7 +312,8 @@ export default function CallPage() {
       setConnected(state === 'connected');
       if (state === 'connected') setStatusText('En appel');
       if (state === 'connecting') setStatusText('Connexion...');
-      if (state === 'failed') setStatusText('Connexion echouee (TURN conseille)');
+      if (state === 'failed') setStatusText('Connexion echouee. Relancez appel ou configurez TURN dedie.');
+      if (state === 'disconnected') setStatusText('Reseau instable, reconnexion...');
       if (state === 'connected' || state === 'failed' || state === 'closed') {
         if (connectTimeoutRef.current) window.clearTimeout(connectTimeoutRef.current);
         connectTimeoutRef.current = null;
