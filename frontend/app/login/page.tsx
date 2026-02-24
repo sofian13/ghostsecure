@@ -5,21 +5,21 @@ import { useRouter } from 'next/navigation';
 import { ensureIdentity } from '@/lib/crypto';
 import { registerUser } from '@/lib/api';
 import { setSession } from '@/lib/session';
-import { checkSupabaseConnection } from '@/lib/supabase';
+import { checkSupabaseConnection, type SupabaseStatus } from '@/lib/supabase';
 
 export default function LoginPage() {
   const router = useRouter();
   const [handle, setHandle] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [supabaseReady, setSupabaseReady] = useState<boolean | null>(null);
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatus | null>(null);
 
   const normalizedHandle = useMemo(() => normalizeHandle(handle), [handle]);
 
   useEffect(() => {
     let active = true;
-    checkSupabaseConnection().then((ok) => {
-      if (active) setSupabaseReady(ok);
+    checkSupabaseConnection().then((status) => {
+      if (active) setSupabaseStatus(status);
     });
     return () => {
       active = false;
@@ -59,7 +59,7 @@ export default function LoginPage() {
         <h1>Ghost Secure</h1>
         <p>Inscription instantanee. Creation en base puis connexion automatique.</p>
         <p className="user-id">
-          Supabase: {supabaseReady === null ? 'verification...' : supabaseReady ? 'connecte' : 'non configure'}
+          Supabase: {supabaseStatus === null ? 'verification...' : supabaseStatus.message}
         </p>
         <div className="auth-meta">
           <span className="auth-chip">E2EE</span>
