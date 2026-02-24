@@ -43,7 +43,6 @@ export default function ChatPage() {
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [input, setInput] = useState('');
   const [peerUserId, setPeerUserId] = useState('');
-  const [ephemeralSeconds, setEphemeralSeconds] = useState(300);
   const [error, setError] = useState<string | null>(null);
   const [friendStatus, setFriendStatus] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -209,7 +208,6 @@ export default function ChatPage() {
       );
       await sendMessage(session, activeId, {
         ...encrypted,
-        expiresInSeconds: ephemeralSeconds,
       });
       setInput('');
       await loadMessages(session, activeId);
@@ -275,7 +273,6 @@ export default function ChatPage() {
       );
       await sendMessage(session, activeId, {
         ...encrypted,
-        expiresInSeconds: ephemeralSeconds,
       });
       await loadMessages(session, activeId);
     } catch {
@@ -429,15 +426,6 @@ export default function ChatPage() {
               onChange={(e) => setInput(e.target.value)}
               className="glass-input"
               placeholder="Ecrire un message chiffre..."
-            />
-            <input
-              type="number"
-              min={5}
-              max={86400}
-              className="glass-input ttl"
-              value={ephemeralSeconds}
-              onChange={(e) => setEphemeralSeconds(Number(e.target.value) || 300)}
-              title="Auto suppression (secondes)"
             />
             <button type="submit" className="glass-btn primary" disabled={!activeConversation}>Envoyer</button>
             {!recording && (
