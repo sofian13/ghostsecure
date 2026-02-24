@@ -86,6 +86,8 @@ export default function CallPage() {
   const activeCallIdRef = useRef<string | null>(null);
   const activeInviteIdRef = useRef<string | null>(null);
   const answerPollRef = useRef<number | null>(null);
+  const incomingPollRef = useRef<number | null>(null);
+  const lastIncomingInviteRef = useRef<string | null>(null);
   const connectTimeoutRef = useRef<number | null>(null);
   const autoCalledRef = useRef(false);
 
@@ -129,10 +131,13 @@ export default function CallPage() {
 
     void hydratePendingInvite(userId);
     void loadHistory(userId);
+    startIncomingPolling(userId);
     setStatusText('Signalisation prete');
 
     return () => {
       void supabase.removeChannel(inviteChannel);
+      if (incomingPollRef.current) window.clearInterval(incomingPollRef.current);
+      incomingPollRef.current = null;
       teardownPeer();
     };
   }, [userId]);
@@ -159,15 +164,7 @@ export default function CallPage() {
       .limit(1)
       .maybeSingle();
     if (!data) return;
-    const row = data as InviteRow;
-    setIncomingOffer({
-      inviteId: row.id,
-      callId: row.call_id,
-      fromUserId: normalizeUserId(row.from_user_id),
-      sdp: row.offer_sdp,
-    });
-    setTargetId(normalizeUserId(row.from_user_id));
-    setStatusText(`Appel entrant de ${normalizeUserId(row.from_user_id)}`);
+    applyIncomingOffer(data as InviteRow);
   };
 
   const handleInviteEvent = async (row: InviteRow): Promise<void> => {
@@ -176,14 +173,7 @@ export default function CallPage() {
     const to = normalizeUserId(row.target_user_id);
 
     if (row.status === 'pending' && to === me) {
-      setIncomingOffer({
-        inviteId: row.id,
-        callId: row.call_id,
-        fromUserId: from,
-        sdp: row.offer_sdp,
-      });
-      setTargetId(from);
-      setStatusText(`Appel entrant de ${from}`);
+      applyIncomingOffer(row);
       return;
     }
 
@@ -375,6 +365,11 @@ export default function CallPage() {
     const target = normalizeUserId(targetId);
     if (!me || !target) return;
 
+    await cleanupOpenInvites(me, target);
+    teardownPeer();
+    setIncomingOffer(null);
+    setStatusText('Preparation de l appel...');
+
     const callId = crypto.randomUUID();
     const inviteId = crypto.randomUUID();
     const pc = await ensurePeer(target, callId);
@@ -434,6 +429,7 @@ export default function CallPage() {
     }
 
     activeInviteIdRef.current = incoming.inviteId;
+    lastIncomingInviteRef.current = incoming.inviteId;
     setStatusText(`Connexion avec ${incoming.fromUserId}...`);
     if (userId) await loadHistory(userId);
   };
@@ -446,6 +442,7 @@ export default function CallPage() {
       .from('call_invite')
       .update({ status: 'rejected', updated_at: new Date().toISOString() })
       .eq('id', incoming.inviteId);
+    lastIncomingInviteRef.current = incoming.inviteId;
     setIncomingOffer(null);
     setStatusText('Appel refuse');
     if (userId) await loadHistory(userId);
@@ -481,6 +478,48 @@ export default function CallPage() {
   }, [history, userId]);
 
   if (!userId) return <main className="centered">Loading...</main>;
+
+  function applyIncomingOffer(row: InviteRow) {
+    const from = normalizeUserId(row.from_user_id);
+    if (row.id === lastIncomingInviteRef.current || !from || row.status !== 'pending') return;
+    setIncomingOffer({
+      inviteId: row.id,
+      callId: row.call_id,
+      fromUserId: from,
+      sdp: row.offer_sdp,
+    });
+    setTargetId(from);
+    setStatusText(`Appel entrant de ${from}`);
+  }
+
+  function startIncomingPolling(me: string) {
+    if (incomingPollRef.current) window.clearInterval(incomingPollRef.current);
+    const supabase = getSupabaseClient();
+    incomingPollRef.current = window.setInterval(async () => {
+      if (!me) return;
+      const { data } = await supabase
+        .from('call_invite')
+        .select('id,call_id,from_user_id,target_user_id,offer_sdp,answer_sdp,status')
+        .eq('target_user_id', me)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!data) return;
+      applyIncomingOffer(data as InviteRow);
+    }, 1500);
+  }
+
+  async function cleanupOpenInvites(me: string, target: string) {
+    const supabase = getSupabaseClient();
+    await supabase
+      .from('call_invite')
+      .update({ status: 'ended', updated_at: new Date().toISOString() })
+      .in('status', ['pending', 'accepted'])
+      .or(
+        `and(from_user_id.eq.${me},target_user_id.eq.${target}),and(from_user_id.eq.${target},target_user_id.eq.${me})`
+      );
+  }
 
   function startAnswerPolling(inviteId: string) {
     if (answerPollRef.current) window.clearInterval(answerPollRef.current);
