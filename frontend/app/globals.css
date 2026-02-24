@@ -596,6 +596,21 @@ select {
   gap: 6px;
 }
 
+.file-preview-link {
+  display: block;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.file-image-preview {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  display: block;
+  background: rgba(0, 0, 0, 0.2);
+}
+
 .file-name {
   font-size: 0.94rem;
   word-break: break-word;

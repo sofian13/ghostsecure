@@ -56,6 +56,7 @@ export default function MessageBubble({ kind, text, voice, file, mine, createdAt
     const blob = new Blob([b64ToBytes(file.dataBase64)], { type: file.mimeType || 'application/octet-stream' });
     return URL.createObjectURL(blob);
   }, [kind, file?.dataBase64, file?.mimeType]);
+  const isImageFile = kind === 'file' && (file?.mimeType ?? '').startsWith('image/');
 
   useEffect(() => {
     return () => {
@@ -106,9 +107,14 @@ export default function MessageBubble({ kind, text, voice, file, mine, createdAt
       )}
       {kind === 'file' && file && fileUrl && (
         <div className="file-message">
+          {isImageFile && (
+            <a href={fileUrl} target="_blank" rel="noreferrer" className="file-preview-link">
+              <img src={fileUrl} alt={file.name} className="file-image-preview" />
+            </a>
+          )}
           <span className="file-name">{file.name}</span>
           <a href={fileUrl} download={file.name} className="file-download">
-            Telecharger
+            {isImageFile ? 'Ouvrir image' : 'Telecharger'}
           </a>
         </div>
       )}

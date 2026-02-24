@@ -81,7 +81,10 @@ export async function decryptForUser(userId: string, message: EncryptedMessage):
 export function previewLabel(message: DecryptedMessage | null): string {
   if (!message) return 'Message chiffre';
   if (message.kind === 'voice') return 'Vocal';
-  if (message.kind === 'file') return `Piece jointe: ${message.file?.name ?? 'fichier'}`;
+  if (message.kind === 'file') {
+    if ((message.file?.mimeType ?? '').startsWith('image/')) return `Photo: ${message.file?.name ?? 'image'}`;
+    return `Piece jointe: ${message.file?.name ?? 'fichier'}`;
+  }
   const text = (message.text ?? '').trim();
   if (!text) return 'Message chiffre';
   return text.length > 45 ? `${text.slice(0, 45)}...` : text;
