@@ -212,6 +212,25 @@ export default function CallPage() {
       }, 14000);
     });
 
+  const waitIceGatheringPartial = (pc: RTCPeerConnection, ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      if (pc.iceGatheringState === 'complete') {
+        resolve();
+        return;
+      }
+      const onState = () => {
+        if (pc.iceGatheringState === 'complete') {
+          pc.removeEventListener('icegatheringstatechange', onState);
+          resolve();
+        }
+      };
+      pc.addEventListener('icegatheringstatechange', onState);
+      window.setTimeout(() => {
+        pc.removeEventListener('icegatheringstatechange', onState);
+        resolve();
+      }, ms);
+    });
+
   const buildProcessedStream = async (input: MediaStream, preset: VoicePreset): Promise<MediaStream> => {
     const ctx = new AudioContext();
     if (ctx.state === 'suspended') await ctx.resume();
@@ -365,7 +384,10 @@ export default function CallPage() {
     const target = normalizeUserId(targetId);
     if (!me || !target) return;
 
-    await cleanupOpenInvites(me, target);
+    await Promise.race([
+      cleanupOpenInvites(me, target),
+      new Promise<void>((resolve) => window.setTimeout(resolve, 700)),
+    ]);
     teardownPeer();
     setIncomingOffer(null);
     setStatusText('Preparation de l appel...');
@@ -375,7 +397,7 @@ export default function CallPage() {
     const pc = await ensurePeer(target, callId);
     const offer = await pc.createOffer({ offerToReceiveAudio: true });
     await pc.setLocalDescription(offer);
-    await waitIceGatheringComplete(pc);
+    await waitIceGatheringPartial(pc, 1200);
 
     const supabase = getSupabaseClient();
     const { error } = await supabase.from('call_invite').insert({
@@ -393,13 +415,14 @@ export default function CallPage() {
       return;
     }
     activeInviteIdRef.current = inviteId;
-    setStatusText(`Appel de ${target}...`);
+    setStatusText(`Sonnerie chez ${target}...`);
     if (connectTimeoutRef.current) window.clearTimeout(connectTimeoutRef.current);
     connectTimeoutRef.current = window.setTimeout(() => {
       const state = pcRef.current?.connectionState;
       if (state !== 'connected') setStatusText('Connexion lente. Reessayez ou ajoutez TURN dedie.');
     }, 22000);
     startAnswerPolling(inviteId);
+    void finalizeOfferSdp(inviteId);
     await loadHistory(me);
   };
 
@@ -412,7 +435,7 @@ export default function CallPage() {
     await pc.setRemoteDescription(incoming.sdp);
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    await waitIceGatheringComplete(pc);
+    await waitIceGatheringPartial(pc, 900);
 
     const supabase = getSupabaseClient();
     const { error } = await supabase
@@ -431,6 +454,7 @@ export default function CallPage() {
     activeInviteIdRef.current = incoming.inviteId;
     lastIncomingInviteRef.current = incoming.inviteId;
     setStatusText(`Connexion avec ${incoming.fromUserId}...`);
+    void finalizeAnswerSdp(incoming.inviteId);
     if (userId) await loadHistory(userId);
   };
 
@@ -507,7 +531,7 @@ export default function CallPage() {
         .maybeSingle();
       if (!data) return;
       applyIncomingOffer(data as InviteRow);
-    }, 1500);
+    }, 700);
   }
 
   async function cleanupOpenInvites(me: string, target: string) {
@@ -519,6 +543,30 @@ export default function CallPage() {
       .or(
         `and(from_user_id.eq.${me},target_user_id.eq.${target}),and(from_user_id.eq.${target},target_user_id.eq.${me})`
       );
+  }
+
+  async function finalizeOfferSdp(inviteId: string) {
+    const pc = pcRef.current;
+    if (!pc) return;
+    await waitIceGatheringComplete(pc);
+    const supabase = getSupabaseClient();
+    await supabase
+      .from('call_invite')
+      .update({ offer_sdp: pc.localDescription, updated_at: new Date().toISOString() })
+      .eq('id', inviteId)
+      .eq('status', 'pending');
+  }
+
+  async function finalizeAnswerSdp(inviteId: string) {
+    const pc = pcRef.current;
+    if (!pc) return;
+    await waitIceGatheringComplete(pc);
+    const supabase = getSupabaseClient();
+    await supabase
+      .from('call_invite')
+      .update({ answer_sdp: pc.localDescription, updated_at: new Date().toISOString() })
+      .eq('id', inviteId)
+      .eq('status', 'accepted');
   }
 
   function startAnswerPolling(inviteId: string) {
