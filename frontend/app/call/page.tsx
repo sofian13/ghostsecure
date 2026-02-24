@@ -83,6 +83,8 @@ export default function CallPage() {
   const processingCleanupRef = useRef<(() => void) | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
   const activeInviteIdRef = useRef<string | null>(null);
+  const answerPollRef = useRef<number | null>(null);
+  const connectTimeoutRef = useRef<number | null>(null);
   const autoCalledRef = useRef(false);
 
   useEffect(() => {
@@ -187,9 +189,13 @@ export default function CallPage() {
       if (row.status === 'accepted' && row.answer_sdp && pcRef.current && !pcRef.current.remoteDescription) {
         await pcRef.current.setRemoteDescription(row.answer_sdp);
         setStatusText('Connexion audio...');
+        if (answerPollRef.current) window.clearInterval(answerPollRef.current);
+        answerPollRef.current = null;
       }
       if (row.status === 'rejected' || row.status === 'ended') {
         setStatusText('Appel termine/refuse');
+        if (answerPollRef.current) window.clearInterval(answerPollRef.current);
+        answerPollRef.current = null;
         teardownPeer();
       }
     }
@@ -211,7 +217,7 @@ export default function CallPage() {
       window.setTimeout(() => {
         pc.removeEventListener('icegatheringstatechange', onState);
         resolve();
-      }, 4000);
+      }, 8000);
     });
 
   const buildProcessedStream = async (input: MediaStream, preset: VoicePreset): Promise<MediaStream> => {
@@ -305,6 +311,10 @@ export default function CallPage() {
       if (state === 'connected') setStatusText('En appel');
       if (state === 'connecting') setStatusText('Connexion...');
       if (state === 'failed') setStatusText('Connexion echouee (TURN conseille)');
+      if (state === 'connected' || state === 'failed' || state === 'closed') {
+        if (connectTimeoutRef.current) window.clearTimeout(connectTimeoutRef.current);
+        connectTimeoutRef.current = null;
+      }
     };
 
     activeCallIdRef.current = callId;
@@ -350,6 +360,10 @@ export default function CallPage() {
     audioCtxRef.current = null;
     activeCallIdRef.current = null;
     activeInviteIdRef.current = null;
+    if (answerPollRef.current) window.clearInterval(answerPollRef.current);
+    answerPollRef.current = null;
+    if (connectTimeoutRef.current) window.clearTimeout(connectTimeoutRef.current);
+    connectTimeoutRef.current = null;
     setConnected(false);
   };
 
@@ -382,6 +396,12 @@ export default function CallPage() {
     }
     activeInviteIdRef.current = inviteId;
     setStatusText(`Appel de ${target}...`);
+    if (connectTimeoutRef.current) window.clearTimeout(connectTimeoutRef.current);
+    connectTimeoutRef.current = window.setTimeout(() => {
+      const state = pcRef.current?.connectionState;
+      if (state !== 'connected') setStatusText('Connexion lente. Reessayez ou ajoutez TURN dedie.');
+    }, 22000);
+    startAnswerPolling(inviteId);
     await loadHistory(me);
   };
 
@@ -458,6 +478,32 @@ export default function CallPage() {
   }, [history, userId]);
 
   if (!userId) return <main className="centered">Loading...</main>;
+
+  function startAnswerPolling(inviteId: string) {
+    if (answerPollRef.current) window.clearInterval(answerPollRef.current);
+    const supabase = getSupabaseClient();
+    const startedAt = Date.now();
+    answerPollRef.current = window.setInterval(async () => {
+      if (!pcRef.current) return;
+      const { data } = await supabase
+        .from('call_invite')
+        .select('id,call_id,from_user_id,target_user_id,offer_sdp,answer_sdp,status')
+        .eq('id', inviteId)
+        .maybeSingle();
+      if (!data) return;
+      const row = data as InviteRow;
+      if (row.status === 'accepted' && row.answer_sdp && !pcRef.current.remoteDescription) {
+        await pcRef.current.setRemoteDescription(row.answer_sdp);
+        setStatusText('Connexion audio...');
+        if (answerPollRef.current) window.clearInterval(answerPollRef.current);
+        answerPollRef.current = null;
+      }
+      if (row.status === 'rejected' || row.status === 'ended' || Date.now() - startedAt > 30000) {
+        if (answerPollRef.current) window.clearInterval(answerPollRef.current);
+        answerPollRef.current = null;
+      }
+    }, 1300);
+  }
 
   return (
     <SecurityShell userId={userId}>

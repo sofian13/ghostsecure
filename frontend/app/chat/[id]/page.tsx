@@ -53,7 +53,7 @@ export default function ConversationPage() {
   const loadMessages = async (s: Session) => {
     const encrypted = await fetchMessages(s, conversationId);
     const decrypted = await Promise.all(encrypted.map((m) => decryptForUser(s.userId, m)));
-    setMessages(decrypted.filter((m): m is DecryptedMessage => Boolean(m)));
+    setMessages(sortAndDedupe(decrypted.filter((m): m is DecryptedMessage => Boolean(m))));
   };
 
   useEffect(() => {
@@ -111,7 +111,7 @@ export default function ConversationPage() {
     if (!session) return;
     if (event.type !== 'new_message' || event.conversationId !== conversationId || !event.message) return;
     const decrypted = await decryptForUser(session.userId, event.message);
-    if (decrypted) setMessages((prev) => [...prev, decrypted]);
+    if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
   });
 
   const sendText = async (e: FormEvent) => {
@@ -135,11 +135,14 @@ export default function ConversationPage() {
   const startVoiceRecording = async () => {
     if (recording || !session) return;
     try {
+      if (typeof MediaRecorder === 'undefined') {
+        setError('Vocal non supporte sur ce navigateur');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm';
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+      const mimeType = candidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? '';
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       recordStreamRef.current = stream;
       recorderRef.current = recorder;
       recordChunksRef.current = [];
@@ -218,15 +221,19 @@ export default function ConversationPage() {
       <button
         type="button"
         className={`composer-mic ${recording ? 'recording' : ''}`}
-        onPointerDown={startVoiceRecording}
-        onPointerUp={stopVoiceRecording}
-        onPointerCancel={cleanupVoiceRecorder}
-        aria-label="Maintenir pour vocal"
+        onClick={() => {
+          if (recording) {
+            void stopVoiceRecording();
+            return;
+          }
+          void startVoiceRecording();
+        }}
+        aria-label={recording ? 'Envoyer vocal' : 'Demarrer vocal'}
       >
-        Mic
+        {recording ? 'Send' : 'Mic'}
       </button>
     );
-  }, [input, recording]);
+  }, [input, recording, startVoiceRecording, stopVoiceRecording]);
 
   if (!session) return <main className="centered">Chargement...</main>;
 
@@ -314,4 +321,10 @@ function normalizeError(err: unknown, fallback: string): string {
   if (message.includes('forbidden')) return 'Action non autorisee.';
   if (message.includes('failed to fetch')) return 'Hors ligne. Reessayez.';
   return fallback;
+}
+
+function sortAndDedupe(items: DecryptedMessage[]): DecryptedMessage[] {
+  const byId = new Map<string, DecryptedMessage>();
+  for (const item of items) byId.set(item.id, item);
+  return [...byId.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
 }
