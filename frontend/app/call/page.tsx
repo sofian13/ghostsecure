@@ -23,7 +23,9 @@ export default function CallPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState('');
   const [connected, setConnected] = useState(false);
+  const [signalingReady, setSignalingReady] = useState(false);
   const [voiceFx, setVoiceFx] = useState(false);
+  const [statusText, setStatusText] = useState('Initialisation signalisation...');
   const channelRef = useRef<RealtimeChannel | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -37,19 +39,28 @@ export default function CallPage() {
       return;
     }
     setUserId(s.userId);
+    const target = new URLSearchParams(window.location.search).get('target')?.trim().toLowerCase() ?? '';
+    if (target) setTargetId(target);
   }, [router]);
 
   useEffect(() => {
     if (!userId) return;
     const supabase = getSupabaseClient();
     const channel = supabase
-      .channel('call-signaling')
+      .channel('call-signaling', {
+        config: {
+          broadcast: { ack: true, self: false },
+        },
+      })
       .on('broadcast', { event: 'call_signal' }, async ({ payload }) => {
         const msg = payload as CallSignalFrame;
-        if (!msg || msg.targetUserId !== userId || !msg.fromUserId) return;
+        const target = normalizeUserId(msg?.targetUserId);
+        const from = normalizeUserId(msg?.fromUserId);
+        if (!target || !from || !userId || target !== normalizeUserId(userId)) return;
 
-        setTargetId(msg.fromUserId);
-        await ensurePeer(msg.fromUserId);
+        setTargetId(from);
+        setStatusText(`Appel entrant de ${from}`);
+        await ensurePeer(from);
         const pc = pcRef.current;
         if (!pc) return;
 
@@ -63,7 +74,7 @@ export default function CallPage() {
               event: 'call_signal',
               payload: {
                 fromUserId: userId,
-                targetUserId: msg.fromUserId,
+                targetUserId: from,
                 payload: { sdp: answer },
               },
             });
@@ -74,11 +85,22 @@ export default function CallPage() {
           await pc.addIceCandidate(msg.payload.candidate);
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setSignalingReady(true);
+          setStatusText('Signalisation prete');
+          return;
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setSignalingReady(false);
+          setStatusText('Signalisation indisponible');
+        }
+      });
     channelRef.current = channel;
 
     return () => {
       void supabase.removeChannel(channel);
+      setSignalingReady(false);
       pcRef.current?.close();
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       processedStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -156,7 +178,8 @@ export default function CallPage() {
   };
 
   const startCall = async () => {
-    if (!targetId.trim() || !channelRef.current || !userId) return;
+    const target = normalizeUserId(targetId);
+    if (!target || !channelRef.current || !userId || !signalingReady) return;
     await ensurePeer();
     const pc = pcRef.current;
     if (!pc) return;
@@ -169,10 +192,11 @@ export default function CallPage() {
       event: 'call_signal',
       payload: {
         fromUserId: userId,
-        targetUserId: targetId.trim(),
+        targetUserId: target,
         payload: { sdp: offer },
       },
     });
+    setStatusText(`Invitation envoyee a ${target}`);
   };
 
   const endCall = () => {
@@ -201,7 +225,9 @@ export default function CallPage() {
           placeholder="ID utilisateur cible"
         />
         <div className="row">
-          <button className="glass-btn primary" type="button" onClick={startCall}>Demarrer appel</button>
+          <button className="glass-btn primary" type="button" onClick={startCall} disabled={!signalingReady}>
+            Demarrer appel
+          </button>
           <button className="glass-btn soft" type="button" onClick={endCall}>Terminer</button>
           <button className="glass-btn soft" type="button" onClick={() => setVoiceFx((v) => !v)}>
             {voiceFx ? 'Voice FX Off' : 'Voice FX On'}
@@ -209,10 +235,15 @@ export default function CallPage() {
           <button className="glass-btn soft" type="button" onClick={() => router.push('/chat')}>Retour chat</button>
         </div>
         <p>{voiceFx ? 'Mode voix fantome actif sur le flux sortant' : 'Mode voix normale'}</p>
+        <p className="muted-text">{statusText}</p>
         <p className={connected ? 'ok-text' : 'muted-text'}>
           {connected ? 'Canal audio securise actif' : 'En attente de connexion...'}
         </p>
       </main>
     </SecurityShell>
   );
+}
+
+function normalizeUserId(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase();
 }

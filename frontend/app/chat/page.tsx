@@ -5,9 +5,19 @@ import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
 import { clearSession, getSession } from '@/lib/session';
-import { createConversation, fetchConversationDetail, fetchConversations, fetchMessages, sendMessage } from '@/lib/api';
+import {
+  acceptFriendRequest,
+  fetchConversationDetail,
+  fetchConversations,
+  fetchIncomingFriendRequests,
+  sendFriendRequest,
+  type FriendRequest,
+  fetchMessages,
+  sendMessage,
+} from '@/lib/api';
 import { decryptIncomingMessage, encryptForParticipants } from '@/lib/crypto';
 import { useRealtime } from '@/lib/useRealtime';
+import { getSupabaseClient } from '@/lib/supabase';
 import type { Conversation, EncryptedMessage, Session } from '@/types';
 
 type Decrypted = {
@@ -24,10 +34,13 @@ export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Decrypted[]>([]);
+  const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [input, setInput] = useState('');
   const [peerUserId, setPeerUserId] = useState('');
   const [ephemeralSeconds, setEphemeralSeconds] = useState(300);
   const [error, setError] = useState<string | null>(null);
+  const [friendStatus, setFriendStatus] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     const s = getSession();
@@ -37,6 +50,14 @@ export default function ChatPage() {
     }
     setSessionState(s);
   }, [router]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 980px)');
+    const apply = () => setSidebarOpen(!media.matches);
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, []);
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
@@ -49,6 +70,11 @@ export default function ChatPage() {
     if (!activeId && data.length > 0) setActiveId(data[0].id);
   };
 
+  const loadFriendRequests = async (s: Session) => {
+    const requests = await fetchIncomingFriendRequests(s);
+    setFriendRequests(requests);
+  };
+
   const loadMessages = async (s: Session, conversationId: string) => {
     const encrypted = await fetchMessages(s, conversationId);
     const decrypted = await Promise.all(encrypted.map((m) => decryptOne(s.userId, m)));
@@ -58,6 +84,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!session) return;
     loadConversations(session).catch((e) => setError(normalizeError(e, 'Erreur chargement conversations')));
+    loadFriendRequests(session).catch(() => null);
   }, [session]);
 
   useEffect(() => {
@@ -73,6 +100,26 @@ export default function ChatPage() {
     return () => window.clearInterval(id);
   }, [session, activeId]);
 
+  useEffect(() => {
+    if (!session) return;
+    const supabase = getSupabaseClient();
+    const channel = supabase
+      .channel(`friend-requests:${session.userId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'friend_request' },
+        async () => {
+          await loadFriendRequests(session);
+          await loadConversations(session);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [session?.userId]);
+
   useRealtime(session, async (payload) => {
     const event = payload as { type?: string; conversationId?: string; message?: EncryptedMessage };
     if (!session) return;
@@ -85,16 +132,30 @@ export default function ChatPage() {
     }
   });
 
-  const onCreateConversation = async (e: FormEvent) => {
+  const onSendFriendRequest = async (e: FormEvent) => {
     e.preventDefault();
     if (!session || !peerUserId.trim()) return;
     try {
-      const conv = await createConversation(session, peerUserId.trim());
+      await sendFriendRequest(session, peerUserId.trim());
+      setFriendStatus(`Demande envoyee a ${peerUserId.trim().toLowerCase()}`);
       setPeerUserId('');
+      await loadFriendRequests(session);
+    } catch (err) {
+      setError(normalizeError(err, "Erreur envoi demande d'ami"));
+    }
+  };
+
+  const onAcceptFriendRequest = async (requestId: string) => {
+    if (!session) return;
+    try {
+      const conv = await acceptFriendRequest(session, requestId);
+      await loadFriendRequests(session);
       await loadConversations(session);
       setActiveId(conv.id);
+      setSidebarOpen(false);
+      setFriendStatus('Demande acceptee');
     } catch (err) {
-      setError(normalizeError(err, 'Erreur creation conversation'));
+      setError(normalizeError(err, "Erreur acceptation d'ami"));
     }
   };
 
@@ -128,15 +189,15 @@ export default function ChatPage() {
   return (
     <SecurityShell userId={session.userId}>
       <main className="chat-shell">
-        <aside className="glass-card sidebar-v2">
+        <aside className={`glass-card sidebar-v2 ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
           <div className="sidebar-top">
             <h1>Ghost Secure</h1>
             <p className="user-id">Session: {session.userId}</p>
           </div>
 
-          <form onSubmit={onCreateConversation} className="stack-form">
+          <form onSubmit={onSendFriendRequest} className="stack-form">
             <label className="field">
-              <span>Nouveau contact</span>
+              <span>Demande d&apos;ami</span>
               <input
                 value={peerUserId}
                 onChange={(e) => setPeerUserId(e.target.value)}
@@ -144,8 +205,21 @@ export default function ChatPage() {
                 className="glass-input"
               />
             </label>
-            <button type="submit" className="glass-btn">Creer / ouvrir</button>
+            <button type="submit" className="glass-btn">Envoyer</button>
           </form>
+
+          <div className="requests-box">
+            <p className="requests-title">Demandes recues</p>
+            {friendRequests.length === 0 && <p className="user-id">Aucune demande en attente</p>}
+            {friendRequests.map((request) => (
+              <div key={request.id} className="request-item">
+                <span>{request.requesterId}</span>
+                <button type="button" className="glass-btn soft" onClick={() => onAcceptFriendRequest(request.id)}>
+                  Accepter
+                </button>
+              </div>
+            ))}
+          </div>
 
           <div className="conv-list">
             {conversations.map((conv) => (
@@ -153,7 +227,10 @@ export default function ChatPage() {
                 key={conv.id}
                 type="button"
                 className={`conv-item ${activeId === conv.id ? 'active' : ''}`}
-                onClick={() => setActiveId(conv.id)}
+                onClick={() => {
+                  setActiveId(conv.id);
+                  setSidebarOpen(false);
+                }}
               >
                 <strong>{conv.peerId}</strong>
                 <span>{new Date(conv.updatedAt).toLocaleString()}</span>
@@ -162,7 +239,6 @@ export default function ChatPage() {
           </div>
 
           <div className="sidebar-actions">
-            <button className="glass-btn soft" type="button" onClick={() => router.push('/call')}>Appel</button>
             <button className="glass-btn soft" type="button" onClick={() => router.push('/settings')}>Securite</button>
             <button className="glass-btn danger" type="button" onClick={logout}>Logout</button>
           </div>
@@ -170,8 +246,24 @@ export default function ChatPage() {
 
         <section className="glass-card chat-main">
           <header className="chat-head">
-            <h2>{activeConversation ? `Conversation: ${activeConversation.peerId}` : 'Aucune conversation'}</h2>
-            <span className="panel-pill">E2EE ACTIVE</span>
+            <div className="chat-head-main">
+              <button type="button" className="glass-btn soft sidebar-toggle" onClick={() => setSidebarOpen((v) => !v)}>
+                Contacts
+              </button>
+              <h2>{activeConversation ? `Conversation: ${activeConversation.peerId}` : 'Aucune conversation'}</h2>
+            </div>
+            <div className="chat-head-actions">
+              {activeConversation && (
+                <button
+                  className="glass-btn primary"
+                  type="button"
+                  onClick={() => router.push(`/call?target=${encodeURIComponent(activeConversation.peerId)}`)}
+                >
+                  Appeler
+                </button>
+              )}
+              <span className="panel-pill">E2EE ACTIVE</span>
+            </div>
           </header>
 
           <div className="message-list no-select">
@@ -204,6 +296,7 @@ export default function ChatPage() {
             <button type="submit" className="glass-btn primary" disabled={!activeConversation}>Envoyer</button>
           </form>
 
+          {friendStatus && <p className="ok-text">{friendStatus}</p>}
           {error && <p className="error-text">{error}</p>}
         </section>
       </main>
@@ -214,7 +307,8 @@ export default function ChatPage() {
 function normalizeError(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
   const message = err.message.toLowerCase();
-  if (message.includes('unauthorized') || message.includes('forbidden')) return 'Session invalide. Reconnectez-vous.';
+  if (message.includes('forbidden')) return 'Action non autorisee.';
+  if (message.includes('invalid') || message.includes('introuvable')) return err.message;
   if (message.includes('failed to fetch')) return 'Supabase indisponible. Verifiez les variables env.';
   return fallback;
 }

@@ -36,9 +36,25 @@ create table if not exists message (
 create index if not exists idx_msg_conv_created on message(conversation_id, created_at);
 create index if not exists idx_msg_sender on message(sender_id);
 
+create table if not exists friend_request (
+  id text primary key,
+  requester_id text not null references app_user(id) on delete cascade,
+  target_user_id text not null references app_user(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'rejected')),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_fr_target_status on friend_request(target_user_id, status, created_at desc);
+create index if not exists idx_fr_requester_status on friend_request(requester_id, status, created_at desc);
+create unique index if not exists uniq_fr_pending_pair
+  on friend_request(requester_id, target_user_id)
+  where status = 'pending';
+
 alter table app_user disable row level security;
 alter table conversation disable row level security;
 alter table conversation_member disable row level security;
 alter table message disable row level security;
+alter table friend_request disable row level security;
 
 alter publication supabase_realtime add table message;
+alter publication supabase_realtime add table friend_request;
