@@ -94,7 +94,7 @@ export default function SecurityShell({ userId, children }: Props) {
           });
           n.onclick = () => {
             window.focus();
-            window.location.href = `/call?target=${encodeURIComponent(fromUserId)}&autocall=0`;
+            window.location.href = `/call?target=${encodeURIComponent(fromUserId)}&autocall=0&autoaccept=1&invite=${encodeURIComponent(inviteId)}`;
           };
         };
 

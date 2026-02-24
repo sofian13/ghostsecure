@@ -71,6 +71,8 @@ export default function CallPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState('');
   const [autoCall, setAutoCall] = useState(false);
+  const [autoAccept, setAutoAccept] = useState(false);
+  const [autoAcceptInviteId, setAutoAcceptInviteId] = useState('');
   const [connected, setConnected] = useState(false);
   const [voicePreset, setVoicePreset] = useState<VoicePreset>('normal');
   const [statusText, setStatusText] = useState('Pret');
@@ -90,6 +92,7 @@ export default function CallPage() {
   const lastIncomingInviteRef = useRef<string | null>(null);
   const connectTimeoutRef = useRef<number | null>(null);
   const autoCalledRef = useRef(false);
+  const autoAcceptedRef = useRef(false);
 
   useEffect(() => {
     const s = getSession();
@@ -103,6 +106,8 @@ export default function CallPage() {
     const target = normalizeUserId(query.get('target'));
     if (target) setTargetId(target);
     setAutoCall(query.get('autocall') === '1');
+    setAutoAccept(query.get('autoaccept') === '1');
+    setAutoAcceptInviteId(query.get('invite') ?? '');
   }, [router]);
 
   const loadHistory = async (me: string) => {
@@ -147,6 +152,13 @@ export default function CallPage() {
     autoCalledRef.current = true;
     void startCall();
   }, [autoCall, targetId]);
+
+  useEffect(() => {
+    if (!autoAccept || autoAcceptedRef.current || !incomingOffer) return;
+    if (autoAcceptInviteId && incomingOffer.inviteId !== autoAcceptInviteId) return;
+    autoAcceptedRef.current = true;
+    void acceptIncoming();
+  }, [autoAccept, autoAcceptInviteId, incomingOffer]);
 
   useEffect(() => {
     if (!pcRef.current || !localStreamRef.current) return;
@@ -437,6 +449,7 @@ export default function CallPage() {
     if (!incoming) return;
     lastIncomingInviteRef.current = incoming.inviteId;
     setIncomingOffer(null);
+    setStatusText(`Reponse automatique a ${incoming.fromUserId}...`);
 
     const pc = await ensurePeer(incoming.fromUserId, incoming.callId);
     await pc.setRemoteDescription(incoming.sdp);
