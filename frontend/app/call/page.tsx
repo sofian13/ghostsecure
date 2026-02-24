@@ -29,17 +29,24 @@ type IncomingOffer = {
   sdp: RTCSessionDescriptionInit;
 };
 
+const PENDING_OFFER_KEY = 'ghost-pending-offer';
+
 function resolveIceServers(): RTCIceServer[] {
   const list: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
   ];
   const turnUrl = process.env.NEXT_PUBLIC_TURN_URL ?? '';
   const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME ?? '';
   const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL ?? '';
   if (turnUrl && turnUsername && turnCredential) {
     list.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
+  } else {
+    list.push({ urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' });
+    list.push({ urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' });
+    list.push({ urls: 'turns:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' });
   }
   return list;
 }
@@ -93,6 +100,20 @@ export default function CallPage() {
     const target = normalizeUserId(query.get('target'));
     if (target) setTargetId(target);
     setAutoCall(query.get('autocall') === '1');
+
+    const pendingRaw = window.sessionStorage.getItem(PENDING_OFFER_KEY);
+    if (pendingRaw) {
+      try {
+        const pending = JSON.parse(pendingRaw) as IncomingOffer;
+        if (pending?.callId && pending?.fromUserId && pending?.sdp?.type === 'offer') {
+          setIncomingOffer(pending);
+          setTargetId(normalizeUserId(pending.fromUserId));
+          setStatusText(`Appel entrant de ${normalizeUserId(pending.fromUserId)}`);
+        }
+      } catch {
+        // Ignore invalid cached offer.
+      }
+    }
   }, [router]);
 
   useEffect(() => {
@@ -139,7 +160,9 @@ export default function CallPage() {
     if (!me || !target || target !== me || !from || !action || !callId) return;
 
     if (action === 'offer' && frame.payload?.sdp?.type === 'offer') {
-      setIncomingOffer({ callId, fromUserId: from, sdp: frame.payload.sdp });
+      const offer = { callId, fromUserId: from, sdp: frame.payload.sdp };
+      setIncomingOffer(offer);
+      window.sessionStorage.setItem(PENDING_OFFER_KEY, JSON.stringify(offer));
       setTargetId(from);
       setStatusText(`Appel entrant de ${from}`);
       void navigator.vibrate?.([140, 90, 140, 90, 180]);
@@ -205,7 +228,7 @@ export default function CallPage() {
       offerRetryCountRef.current += 1;
       if (offerRetryCountRef.current > 12) {
         stopOfferRetry();
-        setStatusText("Aucune reponse. Verifie que l'autre est sur /chat ou /call.");
+        setStatusText("Aucune reponse. Ouvre /chat ou /call sur l'autre appareil.");
         return;
       }
       await sendSignal(payload);
@@ -324,6 +347,8 @@ export default function CallPage() {
     const pc = new RTCPeerConnection({
       iceServers: ICE_SERVERS,
       iceCandidatePoolSize: 10,
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require',
     });
     outbound.getTracks().forEach((track) => pc.addTrack(track, outbound));
 
@@ -407,6 +432,7 @@ export default function CallPage() {
     const me = normalizeUserId(userId);
     if (!incoming || !me) return;
     setIncomingOffer(null);
+    window.sessionStorage.removeItem(PENDING_OFFER_KEY);
 
     const pc = await ensurePeer(incoming.fromUserId, incoming.callId);
     await pc.setRemoteDescription(incoming.sdp);
@@ -435,6 +461,7 @@ export default function CallPage() {
       targetUserId: incoming.fromUserId,
     });
     setIncomingOffer(null);
+    window.sessionStorage.removeItem(PENDING_OFFER_KEY);
     setStatusText('Appel refuse');
   };
 
@@ -452,6 +479,7 @@ export default function CallPage() {
     }
     stopOfferRetry();
     teardownPeer();
+    window.sessionStorage.removeItem(PENDING_OFFER_KEY);
     setStatusText('Appel termine');
   };
 

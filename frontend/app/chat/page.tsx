@@ -28,6 +28,8 @@ type Decrypted = {
   expiresAt: string | null;
 };
 
+const PENDING_OFFER_KEY = 'ghost-pending-offer';
+
 export default function ChatPage() {
   const router = useRouter();
   const [session, setSessionState] = useState<Session | null>(null);
@@ -132,13 +134,23 @@ export default function ChatPage() {
       .on('broadcast', { event: 'call_signal' }, ({ payload }) => {
         const frame = payload as {
           action?: string;
+          callId?: string;
           fromUserId?: string;
           targetUserId?: string;
+          payload?: { sdp?: RTCSessionDescriptionInit };
         };
-        if (frame.action !== 'offer') return;
+        if (frame.action !== 'offer' || frame.payload?.sdp?.type !== 'offer') return;
         const target = (frame.targetUserId ?? '').trim().toLowerCase();
         const from = (frame.fromUserId ?? '').trim().toLowerCase();
-        if (!from || target !== me) return;
+        if (!from || !frame.callId || target !== me) return;
+        window.sessionStorage.setItem(
+          PENDING_OFFER_KEY,
+          JSON.stringify({
+            callId: frame.callId,
+            fromUserId: from,
+            sdp: frame.payload.sdp,
+          })
+        );
         setIncomingCallFrom(from);
       })
       .subscribe();
@@ -305,7 +317,14 @@ export default function ChatPage() {
                 >
                   Repondre
                 </button>
-                <button type="button" className="glass-btn soft" onClick={() => setIncomingCallFrom(null)}>
+                <button
+                  type="button"
+                  className="glass-btn soft"
+                  onClick={() => {
+                    window.sessionStorage.removeItem(PENDING_OFFER_KEY);
+                    setIncomingCallFrom(null);
+                  }}
+                >
                   Ignorer
                 </button>
               </div>
