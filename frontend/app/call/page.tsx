@@ -8,6 +8,7 @@ import { getSession } from '@/lib/session';
 import { getSupabaseClient } from '@/lib/supabase';
 
 type CallAction = 'offer' | 'answer' | 'candidate' | 'reject';
+type VoicePreset = 'normal' | 'ghost' | 'robot' | 'deep';
 
 type CallSignalPayload = {
   sdp?: RTCSessionDescriptionInit;
@@ -34,7 +35,6 @@ function resolveIceServers(): RTCIceServer[] {
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
   ];
-
   const turnUrl = process.env.NEXT_PUBLIC_TURN_URL ?? '';
   const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME ?? '';
   const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL ?? '';
@@ -42,6 +42,17 @@ function resolveIceServers(): RTCIceServer[] {
     list.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
   }
   return list;
+}
+
+function createDistortionCurve(amount: number): Float32Array {
+  const k = Math.max(0, amount);
+  const n = 512;
+  const curve = new Float32Array(n);
+  for (let i = 0; i < n; i += 1) {
+    const x = (i * 2) / n - 1;
+    curve[i] = ((3 + k) * x * 20 * (Math.PI / 180)) / (Math.PI + k * Math.abs(x));
+  }
+  return curve;
 }
 
 const ICE_SERVERS = resolveIceServers();
@@ -53,7 +64,7 @@ export default function CallPage() {
   const [autoCall, setAutoCall] = useState(false);
   const [connected, setConnected] = useState(false);
   const [signalingReady, setSignalingReady] = useState(false);
-  const [voiceFx, setVoiceFx] = useState(false);
+  const [voicePreset, setVoicePreset] = useState<VoicePreset>('normal');
   const [statusText, setStatusText] = useState('Initialisation signalisation...');
   const [incomingOffer, setIncomingOffer] = useState<IncomingOffer | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -62,6 +73,7 @@ export default function CallPage() {
   const processedStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const processingCleanupRef = useRef<(() => void) | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
   const activeTargetRef = useRef<string | null>(null);
   const candidateQueueRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
@@ -77,7 +89,6 @@ export default function CallPage() {
       return;
     }
     setUserId(normalizeUserId(s.userId));
-
     const query = new URLSearchParams(window.location.search);
     const target = normalizeUserId(query.get('target'));
     if (target) setTargetId(target);
@@ -88,9 +99,7 @@ export default function CallPage() {
     if (!userId) return;
     const supabase = getSupabaseClient();
     const channel = supabase
-      .channel('call-signaling', {
-        config: { broadcast: { ack: true, self: false } },
-      })
+      .channel('call-signaling', { config: { broadcast: { ack: true, self: false } } })
       .on('broadcast', { event: 'call_signal' }, async ({ payload }) => {
         await onSignal(payload as CallSignalFrame);
       })
@@ -211,27 +220,89 @@ export default function CallPage() {
     offerRetryPayloadRef.current = null;
   };
 
-  const buildProcessedStream = (input: MediaStream): MediaStream => {
+  const buildProcessedStream = async (input: MediaStream, preset: VoicePreset): Promise<MediaStream> => {
     const ctx = new AudioContext();
+    if (ctx.state === 'suspended') await ctx.resume();
+
     const source = ctx.createMediaStreamSource(input);
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'highpass';
-    filter.frequency.value = 400;
-
-    const shaper = ctx.createWaveShaper();
-    const curve = new Float32Array(256);
-    for (let i = 0; i < 256; i += 1) {
-      const x = (i * 2) / 255 - 1;
-      curve[i] = Math.tanh(2.5 * x);
-    }
-    shaper.curve = curve;
-    shaper.oversample = '4x';
-
     const destination = ctx.createMediaStreamDestination();
-    source.connect(filter);
-    filter.connect(shaper);
-    shaper.connect(destination);
+    const cleanup: Array<() => void> = [];
+
+    if (preset === 'ghost') {
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 320;
+
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1650;
+      bp.Q.value = 1.1;
+
+      const shaper = ctx.createWaveShaper();
+      shaper.curve = createDistortionCurve(30);
+      shaper.oversample = '4x';
+
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -28;
+      compressor.ratio.value = 6;
+
+      source.connect(hp);
+      hp.connect(bp);
+      bp.connect(shaper);
+      shaper.connect(compressor);
+      compressor.connect(destination);
+    } else if (preset === 'robot') {
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 260;
+
+      const shaper = ctx.createWaveShaper();
+      shaper.curve = createDistortionCurve(52);
+      shaper.oversample = '4x';
+
+      const gain = ctx.createGain();
+      gain.gain.value = 0.7;
+
+      const tremolo = ctx.createGain();
+      tremolo.gain.value = 0.7;
+      const lfo = ctx.createOscillator();
+      const lfoDepth = ctx.createGain();
+      lfo.frequency.value = 38;
+      lfoDepth.gain.value = 0.28;
+      lfo.connect(lfoDepth);
+      lfoDepth.connect(tremolo.gain);
+      lfo.start();
+      cleanup.push(() => lfo.stop());
+
+      source.connect(hp);
+      hp.connect(shaper);
+      shaper.connect(gain);
+      gain.connect(tremolo);
+      tremolo.connect(destination);
+    } else if (preset === 'deep') {
+      const lowShelf = ctx.createBiquadFilter();
+      lowShelf.type = 'lowshelf';
+      lowShelf.frequency.value = 180;
+      lowShelf.gain.value = 14;
+
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = 1200;
+
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -30;
+      compressor.ratio.value = 8;
+
+      source.connect(lowShelf);
+      lowShelf.connect(lowpass);
+      lowpass.connect(compressor);
+      compressor.connect(destination);
+    } else {
+      source.connect(destination);
+    }
+
     audioCtxRef.current = ctx;
+    processingCleanupRef.current = () => cleanup.forEach((fn) => fn());
     return destination.stream;
   };
 
@@ -245,8 +316,8 @@ export default function CallPage() {
     localStreamRef.current = local;
 
     let outbound = local;
-    if (voiceFx) {
-      outbound = buildProcessedStream(local);
+    if (voicePreset !== 'normal') {
+      outbound = await buildProcessedStream(local, voicePreset);
       processedStreamRef.current = outbound;
     }
 
@@ -299,6 +370,8 @@ export default function CallPage() {
     localStreamRef.current = null;
     processedStreamRef.current = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+    processingCleanupRef.current?.();
+    processingCleanupRef.current = null;
     audioCtxRef.current?.close();
     audioCtxRef.current = null;
     activeCallIdRef.current = null;
@@ -388,21 +461,33 @@ export default function CallPage() {
     <SecurityShell userId={userId}>
       <main className="glass-card call-screen">
         <h1>Appel vocal</h1>
-        <p className="muted-text">Style WhatsApp: connexion rapide, reponse directe, audio distant auto-play.</p>
+        <p className="muted-text">Connexion rapide + modificateur de voix audible.</p>
         <input
           className="glass-input"
           value={targetId}
           onChange={(e) => setTargetId(e.target.value)}
           placeholder="ID utilisateur cible"
         />
+
+        <label className="field">
+          <span>Modificateur de voix</span>
+          <select
+            className="glass-input"
+            value={voicePreset}
+            onChange={(e) => setVoicePreset(e.target.value as VoicePreset)}
+          >
+            <option value="normal">Normal</option>
+            <option value="ghost">Ghost</option>
+            <option value="robot">Robot</option>
+            <option value="deep">Deep</option>
+          </select>
+        </label>
+
         <div className="row">
           <button className="glass-btn primary" type="button" onClick={startCall} disabled={!signalingReady}>
             Appeler
           </button>
           <button className="glass-btn soft" type="button" onClick={endCall}>Terminer</button>
-          <button className="glass-btn soft" type="button" onClick={() => setVoiceFx((v) => !v)}>
-            {voiceFx ? 'Voice FX Off' : 'Voice FX On'}
-          </button>
           <button className="glass-btn soft" type="button" onClick={() => router.push('/chat')}>Retour chat</button>
         </div>
 
@@ -416,7 +501,6 @@ export default function CallPage() {
           </div>
         )}
 
-        <p>{voiceFx ? 'Voix modifiee active' : 'Voix normale'}</p>
         <p className="muted-text">{statusText}</p>
         <p className={connected ? 'ok-text' : 'muted-text'}>
           {connected ? 'Canal audio securise actif' : 'En attente de connexion...'}
