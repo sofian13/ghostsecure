@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ghost_secure
+      POSTGRES_USER: ghost
+      POSTGRES_PASSWORD: ghost
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    depends_on:
+      - postgres
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: dev
+      APP_SECRET: replace_this_secret
+      DATABASE_URL: postgresql://ghost:ghost@postgres:5432/ghost_secure?serverVersion=16&charset=utf8
+    command: sh -c "php bin/console doctrine:migrations:migrate --no-interaction && php -S 0.0.0.0:8000 -t public"
+
+  ws:
+    build: ./backend
+    depends_on:
+      - postgres
+      - backend
+    ports:
+      - "8081:8081"
+    environment:
+      APP_ENV: dev
+      APP_SECRET: replace_this_secret
+      DATABASE_URL: postgresql://ghost:ghost@postgres:5432/ghost_secure?serverVersion=16&charset=utf8
+    command: php bin/console app:ws-server
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+      - ws
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8081
+
+  adminer:
+    image: adminer
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
