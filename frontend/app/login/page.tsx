@@ -36,15 +36,24 @@ export default function LoginPage() {
       setSession(session);
       router.replace('/chat');
     } catch (err) {
-      const message = err instanceof Error ? err.message.toLowerCase() : '';
+      const raw = err instanceof Error ? err.message : 'Erreur inconnue';
+      const message = raw.toLowerCase();
       if (message.includes('invalid credentials')) {
         setError('Identifiants invalides.');
       } else if (message.includes('already exists')) {
         setError('Cet identifiant existe deja. Connectez-vous.');
+      } else if (message.includes('relation') && message.includes('app_user')) {
+        setError('Schema Supabase non initialise. Execute le fichier supabase/schema.sql dans SQL Editor.');
+      } else if (message.includes('row-level security')) {
+        setError('RLS bloque l\'operation. Applique le schema SQL fourni ou des policies autorisant l\'insert/select.');
+      } else if (message.includes('invalid api key') || message.includes('jwt')) {
+        setError('Cle Supabase invalide. Verifie NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+      } else if (message.includes('missing env')) {
+        setError('Variables manquantes. Verifie NEXT_PUBLIC_SUPABASE_URL et NEXT_PUBLIC_SUPABASE_ANON_KEY.');
       } else if (message.includes('failed to fetch')) {
         setError('Supabase indisponible. Verifiez NEXT_PUBLIC_SUPABASE_URL et NEXT_PUBLIC_SUPABASE_ANON_KEY.');
       } else {
-        setError('Impossible de continuer pour le moment.');
+        setError(`Impossible de continuer: ${raw}`);
       }
     } finally {
       setLoading(false);
