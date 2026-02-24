@@ -285,7 +285,7 @@ export default function ChatPage() {
                 <button
                   className="glass-btn primary"
                   type="button"
-                  onClick={() => router.push(`/call?target=${encodeURIComponent(activeConversation.peerId)}`)}
+                  onClick={() => router.push(`/call?target=${encodeURIComponent(activeConversation.peerId)}&autocall=1`)}
                 >
                   Appeler
                 </button>
@@ -295,13 +295,13 @@ export default function ChatPage() {
           </header>
 
           {incomingCallFrom && (
-            <div className="requests-box">
+            <div className="incoming-call-banner">
               <p className="requests-title">Appel entrant: {incomingCallFrom}</p>
               <div className="row">
                 <button
                   type="button"
                   className="glass-btn primary"
-                  onClick={() => router.push(`/call?target=${encodeURIComponent(incomingCallFrom)}`)}
+                  onClick={() => router.push(`/call?target=${encodeURIComponent(incomingCallFrom)}&autocall=0`)}
                 >
                   Repondre
                 </button>

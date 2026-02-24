@@ -262,6 +262,24 @@ input {
   background: rgba(7, 18, 36, 0.35);
 }
 
+.incoming-call-sheet {
+  display: grid;
+  gap: 0.7rem;
+  border: 1px solid rgba(141, 232, 198, 0.45);
+  border-radius: 16px;
+  padding: 0.85rem;
+  background: rgba(11, 36, 37, 0.68);
+}
+
+.incoming-call-banner {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid rgba(141, 232, 198, 0.45);
+  border-radius: 14px;
+  padding: 0.75rem;
+  background: rgba(12, 35, 48, 0.82);
+}
+
 .requests-title {
   font-size: 0.84rem;
   color: #d9ecff;
@@ -322,6 +340,7 @@ input {
   display: grid;
   grid-template-rows: auto 1fr auto auto;
   gap: 0.8rem;
+  min-height: 0;
 }
 
 .chat-head {
@@ -360,6 +379,7 @@ input {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+  min-height: 0;
 }
 
 .message-bubble {
@@ -451,6 +471,7 @@ input {
     grid-template-columns: 1fr;
     gap: 0.7rem;
     padding: 0.7rem;
+    height: 100vh;
   }
 
   .compose-v2,
@@ -474,6 +495,7 @@ input {
   .chat-head {
     flex-direction: column;
     align-items: stretch;
+    gap: 0.5rem;
   }
 
   .chat-head-main,
@@ -487,10 +509,43 @@ input {
   }
 
   .message-list {
-    min-height: 44vh;
+    min-height: 45vh;
+    max-height: 55vh;
   }
 
   .panel-pill {
     font-size: 0.66rem;
+  }
+
+  .compose-v2 {
+    position: sticky;
+    bottom: 0;
+    padding: 0.45rem;
+    border-radius: 12px;
+    background: rgba(7, 18, 34, 0.88);
+    border: 1px solid rgba(178, 222, 255, 0.18);
+  }
+
+  .incoming-call-banner {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  .call-screen {
+    min-height: 100vh;
+    width: 100%;
+    border-radius: 0;
+    padding: 1rem;
+  }
+
+  .call-screen .row {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .call-screen .row .glass-btn {
+    min-height: 48px;
   }
 }

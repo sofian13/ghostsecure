@@ -28,12 +28,29 @@ type IncomingOffer = {
   sdp: RTCSessionDescriptionInit;
 };
 
-const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+function resolveIceServers(): RTCIceServer[] {
+  const list: RTCIceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+  ];
+
+  const turnUrl = process.env.NEXT_PUBLIC_TURN_URL ?? '';
+  const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME ?? '';
+  const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL ?? '';
+  if (turnUrl && turnUsername && turnCredential) {
+    list.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
+  }
+  return list;
+}
+
+const ICE_SERVERS = resolveIceServers();
 
 export default function CallPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState('');
+  const [autoCall, setAutoCall] = useState(false);
   const [connected, setConnected] = useState(false);
   const [signalingReady, setSignalingReady] = useState(false);
   const [voiceFx, setVoiceFx] = useState(false);
@@ -43,7 +60,6 @@ export default function CallPage() {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const processedStreamRef = useRef<MediaStream | null>(null);
-  const remoteStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
@@ -52,6 +68,7 @@ export default function CallPage() {
   const offerRetryRef = useRef<number | null>(null);
   const offerRetryCountRef = useRef(0);
   const offerRetryPayloadRef = useRef<CallSignalFrame | null>(null);
+  const autoCalledRef = useRef(false);
 
   useEffect(() => {
     const s = getSession();
@@ -60,8 +77,11 @@ export default function CallPage() {
       return;
     }
     setUserId(normalizeUserId(s.userId));
-    const target = new URLSearchParams(window.location.search).get('target')?.trim().toLowerCase() ?? '';
+
+    const query = new URLSearchParams(window.location.search);
+    const target = normalizeUserId(query.get('target'));
     if (target) setTargetId(target);
+    setAutoCall(query.get('autocall') === '1');
   }, [router]);
 
   useEffect(() => {
@@ -72,8 +92,7 @@ export default function CallPage() {
         config: { broadcast: { ack: true, self: false } },
       })
       .on('broadcast', { event: 'call_signal' }, async ({ payload }) => {
-        const msg = payload as CallSignalFrame;
-        await onSignal(msg);
+        await onSignal(payload as CallSignalFrame);
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
@@ -91,10 +110,16 @@ export default function CallPage() {
     return () => {
       stopOfferRetry();
       void supabase.removeChannel(channel);
-      setSignalingReady(false);
       teardownPeer();
+      setSignalingReady(false);
     };
   }, [userId]);
+
+  useEffect(() => {
+    if (!autoCall || autoCalledRef.current || !signalingReady || !targetId) return;
+    autoCalledRef.current = true;
+    void startCall();
+  }, [autoCall, signalingReady, targetId]);
 
   const onSignal = async (frame: CallSignalFrame): Promise<void> => {
     const me = normalizeUserId(userId);
@@ -105,14 +130,10 @@ export default function CallPage() {
     if (!me || !target || target !== me || !from || !action || !callId) return;
 
     if (action === 'offer' && frame.payload?.sdp?.type === 'offer') {
-      if (!('Notification' in window) || Notification.permission !== 'granted') {
-        // no-op
-      } else {
-        new Notification('Appel entrant', { body: `${from} vous appelle` });
-      }
       setIncomingOffer({ callId, fromUserId: from, sdp: frame.payload.sdp });
       setTargetId(from);
       setStatusText(`Appel entrant de ${from}`);
+      void navigator.vibrate?.([140, 90, 140, 90, 180]);
       return;
     }
 
@@ -123,7 +144,7 @@ export default function CallPage() {
       await pc.setRemoteDescription(frame.payload.sdp);
       await flushQueuedCandidates(callId);
       stopOfferRetry();
-      setStatusText('Reponse recue, connexion audio...');
+      setStatusText('Connexion audio en cours...');
       return;
     }
 
@@ -139,8 +160,8 @@ export default function CallPage() {
 
     if (action === 'reject') {
       if (activeCallIdRef.current !== callId) return;
-      setStatusText(`${from} a refuse l'appel`);
       stopOfferRetry();
+      setStatusText(`${from} a termine/refuse l'appel`);
       teardownPeer();
     }
   };
@@ -163,11 +184,7 @@ export default function CallPage() {
 
   const sendSignal = async (signal: CallSignalFrame): Promise<void> => {
     if (!channelRef.current) return;
-    await channelRef.current.send({
-      type: 'broadcast',
-      event: 'call_signal',
-      payload: signal,
-    });
+    await channelRef.current.send({ type: 'broadcast', event: 'call_signal', payload: signal });
   };
 
   const startOfferRetry = () => {
@@ -177,13 +194,13 @@ export default function CallPage() {
       const payload = offerRetryPayloadRef.current;
       if (!payload) return;
       offerRetryCountRef.current += 1;
-      if (offerRetryCountRef.current > 8) {
+      if (offerRetryCountRef.current > 12) {
         stopOfferRetry();
-        setStatusText("Aucune reponse a l'appel");
+        setStatusText("Aucune reponse. Verifie que l'autre est sur /chat ou /call.");
         return;
       }
       await sendSignal(payload);
-    }, 2200);
+    }, 1500);
   };
 
   const stopOfferRetry = () => {
@@ -214,7 +231,6 @@ export default function CallPage() {
     source.connect(filter);
     filter.connect(shaper);
     shaper.connect(destination);
-
     audioCtxRef.current = ctx;
     return destination.stream;
   };
@@ -234,17 +250,19 @@ export default function CallPage() {
       processedStreamRef.current = outbound;
     }
 
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({
+      iceServers: ICE_SERVERS,
+      iceCandidatePoolSize: 10,
+    });
     outbound.getTracks().forEach((track) => pc.addTrack(track, outbound));
 
     pc.ontrack = (event) => {
       const [stream] = event.streams;
-      if (!stream) return;
-      remoteStreamRef.current = stream;
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = stream;
-        void remoteAudioRef.current.play().catch(() => null);
-      }
+      if (!stream || !remoteAudioRef.current) return;
+      remoteAudioRef.current.srcObject = stream;
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1;
+      void remoteAudioRef.current.play().catch(() => null);
     };
 
     pc.onicecandidate = (event) => {
@@ -261,8 +279,10 @@ export default function CallPage() {
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       setConnected(state === 'connected');
-      if (state === 'connected') setStatusText('Canal audio actif');
-      if (state === 'failed') setStatusText('Connexion echouee. Reessayez.');
+      if (state === 'connected') setStatusText('En appel');
+      if (state === 'connecting') setStatusText('Connexion...');
+      if (state === 'failed') setStatusText('Connexion echouee (reseau NAT strict, TURN conseille)');
+      if (state === 'disconnected') setStatusText('Connexion interrompue');
     };
 
     activeCallIdRef.current = callId;
@@ -276,10 +296,9 @@ export default function CallPage() {
     pcRef.current = null;
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     processedStreamRef.current?.getTracks().forEach((t) => t.stop());
-    remoteStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
     processedStreamRef.current = null;
-    remoteStreamRef.current = null;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     audioCtxRef.current?.close();
     audioCtxRef.current = null;
     activeCallIdRef.current = null;
@@ -294,7 +313,7 @@ export default function CallPage() {
 
     const callId = crypto.randomUUID();
     const pc = await ensurePeer(target, callId);
-    const offer = await pc.createOffer();
+    const offer = await pc.createOffer({ offerToReceiveAudio: true });
     await pc.setLocalDescription(offer);
 
     const signal: CallSignalFrame = {
@@ -307,7 +326,7 @@ export default function CallPage() {
     offerRetryPayloadRef.current = signal;
     await sendSignal(signal);
     startOfferRetry();
-    setStatusText(`Invitation envoyee a ${target}`);
+    setStatusText(`Appel de ${target}...`);
   };
 
   const acceptIncoming = async () => {
@@ -329,7 +348,7 @@ export default function CallPage() {
       targetUserId: incoming.fromUserId,
       payload: { sdp: answer },
     });
-    setStatusText(`En communication avec ${incoming.fromUserId}`);
+    setStatusText(`Connexion avec ${incoming.fromUserId}...`);
   };
 
   const rejectIncoming = async () => {
@@ -368,8 +387,8 @@ export default function CallPage() {
   return (
     <SecurityShell userId={userId}>
       <main className="glass-card call-screen">
-        <h1>Ghost Secure Call</h1>
-        <p className="muted-text">WebRTC audio E2EE (DTLS-SRTP) + notification d&apos;appel entrant.</p>
+        <h1>Appel vocal</h1>
+        <p className="muted-text">Style WhatsApp: connexion rapide, reponse directe, audio distant auto-play.</p>
         <input
           className="glass-input"
           value={targetId}
@@ -378,7 +397,7 @@ export default function CallPage() {
         />
         <div className="row">
           <button className="glass-btn primary" type="button" onClick={startCall} disabled={!signalingReady}>
-            Demarrer appel
+            Appeler
           </button>
           <button className="glass-btn soft" type="button" onClick={endCall}>Terminer</button>
           <button className="glass-btn soft" type="button" onClick={() => setVoiceFx((v) => !v)}>
@@ -388,7 +407,7 @@ export default function CallPage() {
         </div>
 
         {incomingOffer && (
-          <div className="requests-box">
+          <div className="incoming-call-sheet">
             <p className="requests-title">Appel entrant: {incomingOffer.fromUserId}</p>
             <div className="row">
               <button className="glass-btn primary" type="button" onClick={acceptIncoming}>Repondre</button>
@@ -397,7 +416,7 @@ export default function CallPage() {
           </div>
         )}
 
-        <p>{voiceFx ? 'Mode voix fantome actif sur le flux sortant' : 'Mode voix normale'}</p>
+        <p>{voiceFx ? 'Voix modifiee active' : 'Voix normale'}</p>
         <p className="muted-text">{statusText}</p>
         <p className={connected ? 'ok-text' : 'muted-text'}>
           {connected ? 'Canal audio securise actif' : 'En attente de connexion...'}
