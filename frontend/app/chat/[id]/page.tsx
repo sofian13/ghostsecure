@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
@@ -38,6 +38,7 @@ export default function ConversationPage() {
   const recordTimerRef = useRef<number | null>(null);
   const recordStartRef = useRef<number>(0);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const s = getSession();
@@ -223,6 +224,39 @@ export default function ConversationPage() {
     }
   };
 
+  const onPickAttachment = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !session) return;
+    if (file.size > 3 * 1024 * 1024) {
+      setError('Fichier trop volumineux (max 3MB)');
+      return;
+    }
+
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = '';
+      for (const b of bytes) binary += String.fromCharCode(b);
+      const payload = JSON.stringify({
+        type: 'file',
+        name: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        dataBase64: btoa(binary),
+        sizeBytes: file.size,
+      });
+
+      const detail = await fetchConversationDetail(session, conversationId);
+      const encrypted = await encryptForParticipants(
+        payload,
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
+      );
+      await sendMessage(session, conversationId, { ...encrypted });
+      await loadMessages(session);
+    } catch {
+      setError("Erreur envoi piece jointe");
+    }
+  };
+
   const discardDraftVoice = () => {
     if (draftVoiceUrl) URL.revokeObjectURL(draftVoiceUrl);
     setDraftVoiceUrl(null);
@@ -332,6 +366,7 @@ export default function ConversationPage() {
               kind={msg.kind}
               text={msg.text}
               voice={msg.voice}
+              file={msg.file}
               mine={msg.senderId === session.userId}
               createdAt={msg.createdAt}
               status={msg.senderId === session.userId ? 'sent' : 'received'}
@@ -356,9 +391,15 @@ export default function ConversationPage() {
         )}
 
         <form className="composer" onSubmit={sendText}>
-          <button type="button" className="icon-btn composer-left" aria-label="Joindre" onClick={() => setError('Piece jointe bientot')}>
+          <button
+            type="button"
+            className="icon-btn composer-left"
+            aria-label="Joindre"
+            onClick={() => fileInputRef.current?.click()}
+          >
             +
           </button>
+          <input ref={fileInputRef} type="file" className="hidden-file-input" onChange={onPickAttachment} />
           <input
             className="composer-input"
             value={input}

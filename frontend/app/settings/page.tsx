@@ -12,6 +12,9 @@ export default function SettingsPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>('dark');
+  const [displayName, setDisplayName] = useState('');
+  const [statusText, setStatusText] = useState('');
+  const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
     const s = getSession();
@@ -25,6 +28,9 @@ export default function SettingsPage() {
     const mode = saved === 'light' ? 'light' : 'dark';
     setTheme(mode);
     document.documentElement.dataset.theme = mode;
+
+    setDisplayName(window.localStorage.getItem('ghost_profile_name') ?? s.userId);
+    setStatusText(window.localStorage.getItem('ghost_profile_status') ?? 'Disponible');
   }, [router]);
 
   const onSwitchTheme = () => {
@@ -36,6 +42,17 @@ export default function SettingsPage() {
 
   if (!userId) return <main className="centered">Loading...</main>;
 
+  const saveProfile = () => {
+    const name = displayName.trim().slice(0, 32) || userId;
+    const status = statusText.trim().slice(0, 60) || 'Disponible';
+    window.localStorage.setItem('ghost_profile_name', name);
+    window.localStorage.setItem('ghost_profile_status', status);
+    setDisplayName(name);
+    setStatusText(status);
+    setSaved('Profil mis a jour');
+    window.setTimeout(() => setSaved(null), 2000);
+  };
+
   return (
     <SecurityShell userId={userId}>
       <main className="mobile-screen settings-mobile">
@@ -45,6 +62,24 @@ export default function SettingsPage() {
             <p className="muted-text">Compte et securite</p>
           </div>
         </header>
+
+        <section className="inline-card">
+          <p className="section-title">Profil</p>
+          <label className="field">
+            <span>Nom affiché</span>
+            <input className="mobile-input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>Statut</span>
+            <input className="mobile-input" value={statusText} onChange={(e) => setStatusText(e.target.value)} />
+          </label>
+          <div className="row">
+            <button type="button" className="ghost-primary" onClick={saveProfile}>
+              Enregistrer le profil
+            </button>
+            {saved && <p className="ok-text">{saved}</p>}
+          </div>
+        </section>
 
         <section className="inline-card">
           <p className="section-title">Affichage</p>

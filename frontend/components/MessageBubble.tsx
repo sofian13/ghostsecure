@@ -9,9 +9,15 @@ type VoicePayload = {
 };
 
 type Props = {
-  kind: 'text' | 'voice';
+  kind: 'text' | 'voice' | 'file';
   text?: string;
   voice?: VoicePayload;
+  file?: {
+    name: string;
+    mimeType: string;
+    dataBase64: string;
+    sizeBytes: number;
+  };
   mine: boolean;
   createdAt: string;
   status?: 'sent' | 'received' | 'read';
@@ -25,7 +31,7 @@ function b64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-export default function MessageBubble({ kind, text, voice, mine, createdAt, status = 'sent', expiresAt }: Props) {
+export default function MessageBubble({ kind, text, voice, file, mine, createdAt, status = 'sent', expiresAt }: Props) {
   const [isExpired, setIsExpired] = useState(false);
   const [playing, setPlaying] = useState(false);
   const voiceAudioId = useId();
@@ -45,11 +51,18 @@ export default function MessageBubble({ kind, text, voice, mine, createdAt, stat
     return URL.createObjectURL(blob);
   }, [kind, voice?.dataBase64, voice?.mimeType]);
 
+  const fileUrl = useMemo(() => {
+    if (kind !== 'file' || !file?.dataBase64) return null;
+    const blob = new Blob([b64ToBytes(file.dataBase64)], { type: file.mimeType || 'application/octet-stream' });
+    return URL.createObjectURL(blob);
+  }, [kind, file?.dataBase64, file?.mimeType]);
+
   useEffect(() => {
     return () => {
       if (voiceUrl) URL.revokeObjectURL(voiceUrl);
+      if (fileUrl) URL.revokeObjectURL(fileUrl);
     };
-  }, [voiceUrl]);
+  }, [voiceUrl, fileUrl]);
 
   const time = new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const statusLabel = mine ? (status === 'read' ? 'Lu' : status === 'received' ? 'Recu' : 'Envoye') : '';
@@ -89,6 +102,14 @@ export default function MessageBubble({ kind, text, voice, mine, createdAt, stat
             onEnded={() => setPlaying(false)}
           />
           <span>{Math.max(1, Math.round((voice.durationMs || 0) / 1000))}s</span>
+        </div>
+      )}
+      {kind === 'file' && file && fileUrl && (
+        <div className="file-message">
+          <span className="file-name">{file.name}</span>
+          <a href={fileUrl} download={file.name} className="file-download">
+            Telecharger
+          </a>
         </div>
       )}
       <div className="message-meta">

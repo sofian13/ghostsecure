@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
-import { clearSession, getSession } from '@/lib/session';
+import { getSession } from '@/lib/session';
 import {
   acceptFriendRequest,
   fetchConversations,
@@ -142,11 +142,6 @@ export default function ChatListPage() {
     }
   };
 
-  const logout = () => {
-    clearSession();
-    router.replace('/login');
-  };
-
   const filteredConversations = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return conversations;
@@ -275,10 +270,6 @@ export default function ChatListPage() {
             {error && <p className="error-text">{error}</p>}
           </div>
         )}
-
-        <button type="button" className="logout-link" onClick={logout}>
-          Logout
-        </button>
 
         <MobileTabs />
       </main>
