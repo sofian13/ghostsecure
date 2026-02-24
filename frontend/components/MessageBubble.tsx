@@ -13,6 +13,8 @@ type Props = {
   text?: string;
   voice?: VoicePayload;
   mine: boolean;
+  createdAt: string;
+  status?: 'sent' | 'received' | 'read';
   expiresAt: string | null;
 };
 
@@ -23,8 +25,7 @@ function b64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-export default function MessageBubble({ kind, text, voice, mine, expiresAt }: Props) {
-  const [revealed, setRevealed] = useState(false);
+export default function MessageBubble({ kind, text, voice, mine, createdAt, status = 'sent', expiresAt }: Props) {
   const [isExpired, setIsExpired] = useState(false);
 
   useEffect(() => {
@@ -35,12 +36,6 @@ export default function MessageBubble({ kind, text, voice, mine, expiresAt }: Pr
     const id = window.setInterval(update, 1000);
     return () => window.clearInterval(id);
   }, [expiresAt]);
-
-  useEffect(() => {
-    if (!revealed) return;
-    const id = window.setTimeout(() => setRevealed(false), 6000);
-    return () => window.clearTimeout(id);
-  }, [revealed]);
 
   const voiceUrl = useMemo(() => {
     if (kind !== 'voice' || !voice?.dataBase64) return null;
@@ -54,27 +49,26 @@ export default function MessageBubble({ kind, text, voice, mine, expiresAt }: Pr
     };
   }, [voiceUrl]);
 
+  const time = new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const statusLabel = mine ? (status === 'read' ? 'Lu' : status === 'received' ? 'Recu' : 'Envoye') : '';
+
   if (isExpired) {
     return <div className={`message-bubble ${mine ? 'mine' : 'peer'}`}>[message supprime]</div>;
   }
 
   return (
-    <button
-      type="button"
-      className={`message-bubble ${mine ? 'mine' : 'peer'}`}
-      onClick={() => setRevealed((v) => !v)}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      {!revealed && (kind === 'voice' ? 'cliquer pour ecouter vocal' : 'cliquer pour afficher')}
-
-      {revealed && kind === 'text' && <span>{text}</span>}
-
-      {revealed && kind === 'voice' && voice && voiceUrl && (
+    <div className={`message-bubble ${mine ? 'mine' : 'peer'}`}>
+      {kind === 'text' && <p className="message-text">{text}</p>}
+      {kind === 'voice' && voice && voiceUrl && (
         <div className="voice-message">
           <audio controls preload="metadata" src={voiceUrl} />
           <span>{Math.max(1, Math.round((voice.durationMs || 0) / 1000))}s</span>
         </div>
       )}
-    </button>
+      <div className="message-meta">
+        <span>{time}</span>
+        {statusLabel && <span className="message-status">{statusLabel}</span>}
+      </div>
+    </div>
   );
 }

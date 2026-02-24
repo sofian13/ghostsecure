@@ -1,14 +1,9 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import GhostAmbient from '@/components/GhostAmbient';
-import { Orbitron, Space_Grotesk } from 'next/font/google';
+import { Inter } from 'next/font/google';
 
-const displayFont = Orbitron({
-  subsets: ['latin'],
-  variable: '--font-display',
-});
-
-const bodyFont = Space_Grotesk({
+const inter = Inter({
   subsets: ['latin'],
   variable: '--font-body',
 });
@@ -25,7 +20,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
-      <body className={`${displayFont.variable} ${bodyFont.variable}`}>
+      <body className={inter.variable}>
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('ghost_theme');document.documentElement.dataset.theme=(t==='light'?'light':'dark')}catch(e){document.documentElement.dataset.theme='dark'}",
+          }}
+        />
         <GhostAmbient />
         {children}
       </body>

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
+import MobileTabs from '@/components/MobileTabs';
 import { getSession } from '@/lib/session';
 import { getSupabaseClient } from '@/lib/supabase';
 
@@ -16,6 +17,8 @@ type InviteRow = {
   offer_sdp: RTCSessionDescriptionInit;
   answer_sdp: RTCSessionDescriptionInit | null;
   status: 'pending' | 'accepted' | 'rejected' | 'ended';
+  created_at?: string;
+  updated_at?: string;
 };
 
 type IncomingOffer = {
@@ -70,6 +73,7 @@ export default function CallPage() {
   const [voicePreset, setVoicePreset] = useState<VoicePreset>('normal');
   const [statusText, setStatusText] = useState('Pret');
   const [incomingOffer, setIncomingOffer] = useState<IncomingOffer | null>(null);
+  const [history, setHistory] = useState<InviteRow[]>([]);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -79,7 +83,6 @@ export default function CallPage() {
   const processingCleanupRef = useRef<(() => void) | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
   const activeInviteIdRef = useRef<string | null>(null);
-  const activeTargetRef = useRef<string | null>(null);
   const autoCalledRef = useRef(false);
 
   useEffect(() => {
@@ -88,12 +91,24 @@ export default function CallPage() {
       router.replace('/login');
       return;
     }
-    setUserId(normalizeUserId(s.userId));
+    const me = normalizeUserId(s.userId);
+    setUserId(me);
     const query = new URLSearchParams(window.location.search);
     const target = normalizeUserId(query.get('target'));
     if (target) setTargetId(target);
     setAutoCall(query.get('autocall') === '1');
   }, [router]);
+
+  const loadHistory = async (me: string) => {
+    const supabase = getSupabaseClient();
+    const { data } = await supabase
+      .from('call_invite')
+      .select('id,call_id,from_user_id,target_user_id,offer_sdp,answer_sdp,status,created_at,updated_at')
+      .or(`from_user_id.eq.${me},target_user_id.eq.${me}`)
+      .order('created_at', { ascending: false })
+      .limit(40);
+    setHistory((data ?? []) as InviteRow[]);
+  };
 
   useEffect(() => {
     if (!userId) return;
@@ -104,10 +119,12 @@ export default function CallPage() {
         const row = (payload.new || payload.old) as InviteRow | undefined;
         if (!row) return;
         await handleInviteEvent(row);
+        await loadHistory(userId);
       })
       .subscribe();
 
     void hydratePendingInvite(userId);
+    void loadHistory(userId);
     setStatusText('Signalisation prete');
 
     return () => {
@@ -287,11 +304,10 @@ export default function CallPage() {
       setConnected(state === 'connected');
       if (state === 'connected') setStatusText('En appel');
       if (state === 'connecting') setStatusText('Connexion...');
-      if (state === 'failed') setStatusText('Connexion echouee (TURN requis sur ce reseau)');
+      if (state === 'failed') setStatusText('Connexion echouee (TURN conseille)');
     };
 
     activeCallIdRef.current = callId;
-    activeTargetRef.current = target;
     pcRef.current = pc;
     return pc;
   };
@@ -334,7 +350,6 @@ export default function CallPage() {
     audioCtxRef.current = null;
     activeCallIdRef.current = null;
     activeInviteIdRef.current = null;
-    activeTargetRef.current = null;
     setConnected(false);
   };
 
@@ -367,6 +382,7 @@ export default function CallPage() {
     }
     activeInviteIdRef.current = inviteId;
     setStatusText(`Appel de ${target}...`);
+    await loadHistory(me);
   };
 
   const acceptIncoming = async () => {
@@ -396,6 +412,7 @@ export default function CallPage() {
 
     activeInviteIdRef.current = incoming.inviteId;
     setStatusText(`Connexion avec ${incoming.fromUserId}...`);
+    if (userId) await loadHistory(userId);
   };
 
   const rejectIncoming = async () => {
@@ -408,6 +425,7 @@ export default function CallPage() {
       .eq('id', incoming.inviteId);
     setIncomingOffer(null);
     setStatusText('Appel refuse');
+    if (userId) await loadHistory(userId);
   };
 
   const endCall = async () => {
@@ -421,53 +439,101 @@ export default function CallPage() {
     }
     teardownPeer();
     setStatusText('Appel termine');
+    if (userId) await loadHistory(userId);
   };
+
+  const historyRows = useMemo(() => {
+    return history.map((row) => {
+      const me = normalizeUserId(userId);
+      const incoming = normalizeUserId(row.target_user_id) === me;
+      const peer = incoming ? row.from_user_id : row.target_user_id;
+      return {
+        id: row.id,
+        incoming,
+        peer,
+        state: row.status,
+        date: row.created_at ?? row.updated_at ?? new Date().toISOString(),
+      };
+    });
+  }, [history, userId]);
 
   if (!userId) return <main className="centered">Loading...</main>;
 
   return (
     <SecurityShell userId={userId}>
-      <main className="glass-card call-screen">
-        <h1>Appel vocal</h1>
-        <p className="muted-text">Messages permanents + vocal + signalisation stable.</p>
-        <input
-          className="glass-input"
-          value={targetId}
-          onChange={(e) => setTargetId(e.target.value)}
-          placeholder="ID utilisateur cible"
-        />
+      <main className="mobile-screen call-mobile">
+        <header className="mobile-header">
+          <div>
+            <h1>Appels</h1>
+            <p className="muted-text">Historique securise</p>
+          </div>
+          <button type="button" className="ghost-primary" onClick={startCall}>
+            Nouvel appel
+          </button>
+        </header>
 
-        <label className="field">
-          <span>Modificateur de voix</span>
-          <select className="glass-input" value={voicePreset} onChange={(e) => setVoicePreset(e.target.value as VoicePreset)}>
-            <option value="normal">Normal</option>
-            <option value="ghost">Ghost</option>
-            <option value="robot">Robot</option>
-            <option value="deep">Deep</option>
-          </select>
-        </label>
+        <section className="inline-card">
+          <label className="field">
+            <span>Utilisateur a appeler</span>
+            <input
+              className="mobile-input"
+              value={targetId}
+              onChange={(e) => setTargetId(e.target.value)}
+              placeholder="ID utilisateur"
+            />
+          </label>
 
-        <div className="row">
-          <button className="glass-btn primary" type="button" onClick={startCall}>Appeler</button>
-          <button className="glass-btn soft" type="button" onClick={endCall}>Terminer</button>
-          <button className="glass-btn soft" type="button" onClick={() => router.push('/chat')}>Retour chat</button>
-        </div>
+          <label className="field">
+            <span>Voix</span>
+            <select className="mobile-input" value={voicePreset} onChange={(e) => setVoicePreset(e.target.value as VoicePreset)}>
+              <option value="normal">Normal</option>
+              <option value="ghost">Ghost</option>
+              <option value="robot">Robot</option>
+              <option value="deep">Deep</option>
+            </select>
+          </label>
+
+          <div className="row">
+            <button className="ghost-primary" type="button" onClick={startCall}>Appeler</button>
+            <button className="ghost-secondary" type="button" onClick={endCall}>Terminer</button>
+            <button className="ghost-secondary" type="button" onClick={() => router.push('/chat')}>Retour chat</button>
+          </div>
+
+          <p className={connected ? 'ok-text' : 'muted-text'}>{connected ? 'Canal audio actif' : statusText}</p>
+          <audio ref={remoteAudioRef} autoPlay playsInline />
+        </section>
 
         {incomingOffer && (
-          <div className="incoming-call-sheet">
-            <p className="requests-title">Appel entrant: {incomingOffer.fromUserId}</p>
+          <section className="incoming-banner">
+            <p>{incomingOffer.fromUserId} appelle</p>
             <div className="row">
-              <button className="glass-btn primary" type="button" onClick={acceptIncoming}>Repondre</button>
-              <button className="glass-btn danger" type="button" onClick={rejectIncoming}>Refuser</button>
+              <button className="ghost-primary" type="button" onClick={acceptIncoming}>Repondre</button>
+              <button className="ghost-secondary" type="button" onClick={rejectIncoming}>Refuser</button>
             </div>
-          </div>
+          </section>
         )}
 
-        <p className="muted-text">{statusText}</p>
-        <p className={connected ? 'ok-text' : 'muted-text'}>
-          {connected ? 'Canal audio securise actif' : 'En attente de connexion...'}
-        </p>
-        <audio ref={remoteAudioRef} autoPlay playsInline />
+        <section className="call-list">
+          {historyRows.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              className="call-row"
+              onClick={() => setTargetId(normalizeUserId(item.peer))}
+            >
+              <div className="chat-avatar small" aria-hidden="true">{item.peer.slice(0, 1).toUpperCase()}</div>
+              <div className="chat-content">
+                <div className="chat-topline">
+                  <strong>{item.peer}</strong>
+                  <span>{new Date(item.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+                <p className="muted-text">{item.incoming ? 'Entrant' : 'Sortant'} - {item.state}</p>
+              </div>
+            </button>
+          ))}
+        </section>
+
+        <MobileTabs />
       </main>
     </SecurityShell>
   );
