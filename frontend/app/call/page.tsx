@@ -7,29 +7,38 @@ import SecurityShell from '@/components/SecurityShell';
 import { getSession } from '@/lib/session';
 import { getSupabaseClient } from '@/lib/supabase';
 
-type CallAction = 'offer' | 'answer' | 'candidate' | 'reject';
 type VoicePreset = 'normal' | 'ghost' | 'robot' | 'deep';
 
-type CallSignalPayload = {
-  sdp?: RTCSessionDescriptionInit;
-  candidate?: RTCIceCandidateInit;
+type CandidateSignal = {
+  action: 'candidate';
+  callId: string;
+  fromUserId: string;
+  targetUserId: string;
+  payload: { candidate: RTCIceCandidateInit };
 };
 
-type CallSignalFrame = {
-  action?: CallAction;
-  callId?: string;
-  fromUserId?: string;
-  targetUserId?: string;
-  payload?: CallSignalPayload;
+type InviteRow = {
+  id: string;
+  call_id: string;
+  from_user_id: string;
+  target_user_id: string;
+  offer_sdp: RTCSessionDescriptionInit;
+  answer_sdp: RTCSessionDescriptionInit | null;
+  status: 'pending' | 'accepted' | 'rejected' | 'ended';
+  created_at: string;
+  updated_at: string;
 };
 
 type IncomingOffer = {
+  inviteId: string;
   callId: string;
   fromUserId: string;
   sdp: RTCSessionDescriptionInit;
 };
 
-const PENDING_OFFER_KEY = 'ghost-pending-offer';
+function normalizeUserId(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase();
+}
 
 function resolveIceServers(): RTCIceServer[] {
   const list: RTCIceServer[] = [
@@ -74,7 +83,8 @@ export default function CallPage() {
   const [voicePreset, setVoicePreset] = useState<VoicePreset>('normal');
   const [statusText, setStatusText] = useState('Initialisation signalisation...');
   const [incomingOffer, setIncomingOffer] = useState<IncomingOffer | null>(null);
-  const channelRef = useRef<RealtimeChannel | null>(null);
+
+  const candidateChannelRef = useRef<RealtimeChannel | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const processedStreamRef = useRef<MediaStream | null>(null);
@@ -82,11 +92,9 @@ export default function CallPage() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const processingCleanupRef = useRef<(() => void) | null>(null);
   const activeCallIdRef = useRef<string | null>(null);
+  const activeInviteIdRef = useRef<string | null>(null);
   const activeTargetRef = useRef<string | null>(null);
   const candidateQueueRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
-  const offerRetryRef = useRef<number | null>(null);
-  const offerRetryCountRef = useRef(0);
-  const offerRetryPayloadRef = useRef<CallSignalFrame | null>(null);
   const autoCalledRef = useRef(false);
 
   useEffect(() => {
@@ -100,46 +108,49 @@ export default function CallPage() {
     const target = normalizeUserId(query.get('target'));
     if (target) setTargetId(target);
     setAutoCall(query.get('autocall') === '1');
-
-    const pendingRaw = window.sessionStorage.getItem(PENDING_OFFER_KEY);
-    if (pendingRaw) {
-      try {
-        const pending = JSON.parse(pendingRaw) as IncomingOffer;
-        if (pending?.callId && pending?.fromUserId && pending?.sdp?.type === 'offer') {
-          setIncomingOffer(pending);
-          setTargetId(normalizeUserId(pending.fromUserId));
-          setStatusText(`Appel entrant de ${normalizeUserId(pending.fromUserId)}`);
-        }
-      } catch {
-        // Ignore invalid cached offer.
-      }
-    }
   }, [router]);
 
   useEffect(() => {
     if (!userId) return;
     const supabase = getSupabaseClient();
-    const channel = supabase
-      .channel('call-signaling', { config: { broadcast: { ack: true, self: false } } })
+
+    const candidateChannel = supabase
+      .channel('call-candidates', { config: { broadcast: { ack: true, self: false } } })
       .on('broadcast', { event: 'call_signal' }, async ({ payload }) => {
-        await onSignal(payload as CallSignalFrame);
+        const signal = payload as CandidateSignal;
+        if (signal.action !== 'candidate') return;
+        const me = normalizeUserId(userId);
+        if (normalizeUserId(signal.targetUserId) !== me) return;
+        if (!signal.callId || !signal.payload?.candidate) return;
+        const pc = pcRef.current;
+        if (!pc || activeCallIdRef.current !== signal.callId || !pc.remoteDescription) {
+          queueCandidate(signal.callId, signal.payload.candidate);
+          return;
+        }
+        await pc.addIceCandidate(signal.payload.candidate);
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           setSignalingReady(true);
           setStatusText('Signalisation prete');
-          return;
-        }
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          setSignalingReady(false);
-          setStatusText('Signalisation indisponible');
         }
       });
-    channelRef.current = channel;
+    candidateChannelRef.current = candidateChannel;
+
+    const inviteChannel = supabase
+      .channel(`call-invite:${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'call_invite' }, async (payload) => {
+        const row = (payload.new || payload.old) as InviteRow | undefined;
+        if (!row) return;
+        await handleInviteEvent(row);
+      })
+      .subscribe();
+
+    void hydratePendingInvite(userId);
 
     return () => {
-      stopOfferRetry();
-      void supabase.removeChannel(channel);
+      void supabase.removeChannel(candidateChannel);
+      void supabase.removeChannel(inviteChannel);
       teardownPeer();
       setSignalingReady(false);
     };
@@ -151,50 +162,61 @@ export default function CallPage() {
     void startCall();
   }, [autoCall, signalingReady, targetId]);
 
-  const onSignal = async (frame: CallSignalFrame): Promise<void> => {
-    const me = normalizeUserId(userId);
-    const target = normalizeUserId(frame.targetUserId);
-    const from = normalizeUserId(frame.fromUserId);
-    const action = frame.action;
-    const callId = frame.callId ?? '';
-    if (!me || !target || target !== me || !from || !action || !callId) return;
+  useEffect(() => {
+    if (!pcRef.current || !localStreamRef.current || !activeCallIdRef.current) return;
+    void replaceOutgoingTrack(voicePreset);
+  }, [voicePreset]);
 
-    if (action === 'offer' && frame.payload?.sdp?.type === 'offer') {
-      const offer = { callId, fromUserId: from, sdp: frame.payload.sdp };
-      setIncomingOffer(offer);
-      window.sessionStorage.setItem(PENDING_OFFER_KEY, JSON.stringify(offer));
+  const hydratePendingInvite = async (me: string): Promise<void> => {
+    const supabase = getSupabaseClient();
+    const { data } = await supabase
+      .from('call_invite')
+      .select('id,call_id,from_user_id,target_user_id,offer_sdp,answer_sdp,status,created_at,updated_at')
+      .eq('target_user_id', me)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!data) return;
+    const row = data as InviteRow;
+    setIncomingOffer({
+      inviteId: row.id,
+      callId: row.call_id,
+      fromUserId: normalizeUserId(row.from_user_id),
+      sdp: row.offer_sdp,
+    });
+    setTargetId(normalizeUserId(row.from_user_id));
+    setStatusText(`Appel entrant de ${normalizeUserId(row.from_user_id)}`);
+  };
+
+  const handleInviteEvent = async (row: InviteRow): Promise<void> => {
+    const me = normalizeUserId(userId);
+    const from = normalizeUserId(row.from_user_id);
+    const to = normalizeUserId(row.target_user_id);
+
+    if (row.status === 'pending' && to === me) {
+      setIncomingOffer({
+        inviteId: row.id,
+        callId: row.call_id,
+        fromUserId: from,
+        sdp: row.offer_sdp,
+      });
       setTargetId(from);
       setStatusText(`Appel entrant de ${from}`);
       void navigator.vibrate?.([140, 90, 140, 90, 180]);
       return;
     }
 
-    if (action === 'answer' && frame.payload?.sdp?.type === 'answer') {
-      if (activeCallIdRef.current !== callId) return;
-      const pc = pcRef.current;
-      if (!pc) return;
-      await pc.setRemoteDescription(frame.payload.sdp);
-      await flushQueuedCandidates(callId);
-      stopOfferRetry();
-      setStatusText('Connexion audio en cours...');
-      return;
-    }
-
-    if (action === 'candidate' && frame.payload?.candidate) {
-      const pc = pcRef.current;
-      if (!pc || activeCallIdRef.current !== callId || !pc.remoteDescription) {
-        queueCandidate(callId, frame.payload.candidate);
-        return;
+    if (from === me && activeCallIdRef.current === row.call_id) {
+      if (row.status === 'accepted' && row.answer_sdp && pcRef.current && !pcRef.current.remoteDescription) {
+        await pcRef.current.setRemoteDescription(row.answer_sdp);
+        await flushQueuedCandidates(row.call_id);
+        setStatusText('Connexion audio en cours...');
       }
-      await pc.addIceCandidate(frame.payload.candidate);
-      return;
-    }
-
-    if (action === 'reject') {
-      if (activeCallIdRef.current !== callId) return;
-      stopOfferRetry();
-      setStatusText(`${from} a termine/refuse l'appel`);
-      teardownPeer();
+      if (row.status === 'rejected' || row.status === 'ended') {
+        setStatusText('Appel termine/refuse');
+        teardownPeer();
+      }
     }
   };
 
@@ -214,39 +236,14 @@ export default function CallPage() {
     candidateQueueRef.current.delete(callId);
   };
 
-  const sendSignal = async (signal: CallSignalFrame): Promise<void> => {
-    if (!channelRef.current) return;
-    await channelRef.current.send({ type: 'broadcast', event: 'call_signal', payload: signal });
-  };
-
-  const startOfferRetry = () => {
-    stopOfferRetry();
-    offerRetryCountRef.current = 0;
-    offerRetryRef.current = window.setInterval(async () => {
-      const payload = offerRetryPayloadRef.current;
-      if (!payload) return;
-      offerRetryCountRef.current += 1;
-      if (offerRetryCountRef.current > 12) {
-        stopOfferRetry();
-        setStatusText("Aucune reponse. Ouvre /chat ou /call sur l'autre appareil.");
-        return;
-      }
-      await sendSignal(payload);
-    }, 1500);
-  };
-
-  const stopOfferRetry = () => {
-    if (offerRetryRef.current) {
-      window.clearInterval(offerRetryRef.current);
-      offerRetryRef.current = null;
-    }
-    offerRetryPayloadRef.current = null;
+  const sendCandidate = async (signal: CandidateSignal): Promise<void> => {
+    if (!candidateChannelRef.current) return;
+    await candidateChannelRef.current.send({ type: 'broadcast', event: 'call_signal', payload: signal });
   };
 
   const buildProcessedStream = async (input: MediaStream, preset: VoicePreset): Promise<MediaStream> => {
     const ctx = new AudioContext();
     if (ctx.state === 'suspended') await ctx.resume();
-
     const source = ctx.createMediaStreamSource(input);
     const destination = ctx.createMediaStreamDestination();
     const cleanup: Array<() => void> = [];
@@ -255,20 +252,16 @@ export default function CallPage() {
       const hp = ctx.createBiquadFilter();
       hp.type = 'highpass';
       hp.frequency.value = 320;
-
       const bp = ctx.createBiquadFilter();
       bp.type = 'bandpass';
       bp.frequency.value = 1650;
       bp.Q.value = 1.1;
-
       const shaper = ctx.createWaveShaper();
       shaper.curve = createDistortionCurve(30);
       shaper.oversample = '4x';
-
       const compressor = ctx.createDynamicsCompressor();
       compressor.threshold.value = -28;
       compressor.ratio.value = 6;
-
       source.connect(hp);
       hp.connect(bp);
       bp.connect(shaper);
@@ -278,14 +271,11 @@ export default function CallPage() {
       const hp = ctx.createBiquadFilter();
       hp.type = 'highpass';
       hp.frequency.value = 260;
-
       const shaper = ctx.createWaveShaper();
       shaper.curve = createDistortionCurve(52);
       shaper.oversample = '4x';
-
       const gain = ctx.createGain();
       gain.gain.value = 0.7;
-
       const tremolo = ctx.createGain();
       tremolo.gain.value = 0.7;
       const lfo = ctx.createOscillator();
@@ -296,7 +286,6 @@ export default function CallPage() {
       lfoDepth.connect(tremolo.gain);
       lfo.start();
       cleanup.push(() => lfo.stop());
-
       source.connect(hp);
       hp.connect(shaper);
       shaper.connect(gain);
@@ -307,15 +296,12 @@ export default function CallPage() {
       lowShelf.type = 'lowshelf';
       lowShelf.frequency.value = 180;
       lowShelf.gain.value = 14;
-
       const lowpass = ctx.createBiquadFilter();
       lowpass.type = 'lowpass';
       lowpass.frequency.value = 1200;
-
       const compressor = ctx.createDynamicsCompressor();
       compressor.threshold.value = -30;
       compressor.ratio.value = 8;
-
       source.connect(lowShelf);
       lowShelf.connect(lowpass);
       lowpass.connect(compressor);
@@ -333,7 +319,11 @@ export default function CallPage() {
     if (pcRef.current) return pcRef.current;
 
     const local = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: {
+        echoCancellation: voicePreset === 'normal',
+        noiseSuppression: voicePreset === 'normal',
+        autoGainControl: voicePreset === 'normal',
+      },
       video: false,
     });
     localStreamRef.current = local;
@@ -363,11 +353,13 @@ export default function CallPage() {
 
     pc.onicecandidate = (event) => {
       if (!event.candidate || !userId) return;
-      void sendSignal({
+      const targetUser = activeTargetRef.current ?? target;
+      const currentCallId = activeCallIdRef.current ?? callId;
+      void sendCandidate({
         action: 'candidate',
-        callId,
+        callId: currentCallId,
         fromUserId: userId,
-        targetUserId: target,
+        targetUserId: targetUser,
         payload: { candidate: event.candidate.toJSON() },
       });
     };
@@ -377,7 +369,7 @@ export default function CallPage() {
       setConnected(state === 'connected');
       if (state === 'connected') setStatusText('En appel');
       if (state === 'connecting') setStatusText('Connexion...');
-      if (state === 'failed') setStatusText('Connexion echouee (reseau NAT strict, TURN conseille)');
+      if (state === 'failed') setStatusText('Connexion echouee (TURN requis sur ce reseau)');
       if (state === 'disconnected') setStatusText('Connexion interrompue');
     };
 
@@ -385,6 +377,30 @@ export default function CallPage() {
     activeTargetRef.current = target;
     pcRef.current = pc;
     return pc;
+  };
+
+  const replaceOutgoingTrack = async (preset: VoicePreset): Promise<void> => {
+    if (!pcRef.current || !localStreamRef.current) return;
+    const sender = pcRef.current.getSenders().find((s) => s.track?.kind === 'audio');
+    if (!sender) return;
+
+    if (preset === 'normal') {
+      const originalTrack = localStreamRef.current.getAudioTracks()[0];
+      if (originalTrack) await sender.replaceTrack(originalTrack);
+      processedStreamRef.current?.getTracks().forEach((t) => t.stop());
+      processedStreamRef.current = null;
+      processingCleanupRef.current?.();
+      processingCleanupRef.current = null;
+      audioCtxRef.current?.close();
+      audioCtxRef.current = null;
+      return;
+    }
+
+    const processed = await buildProcessedStream(localStreamRef.current, preset);
+    const track = processed.getAudioTracks()[0];
+    if (track) await sender.replaceTrack(track);
+    processedStreamRef.current?.getTracks().forEach((t) => t.stop());
+    processedStreamRef.current = processed;
   };
 
   const teardownPeer = () => {
@@ -400,6 +416,7 @@ export default function CallPage() {
     audioCtxRef.current?.close();
     audioCtxRef.current = null;
     activeCallIdRef.current = null;
+    activeInviteIdRef.current = null;
     activeTargetRef.current = null;
     setConnected(false);
   };
@@ -410,20 +427,28 @@ export default function CallPage() {
     if (!me || !target || !signalingReady) return;
 
     const callId = crypto.randomUUID();
+    const inviteId = crypto.randomUUID();
     const pc = await ensurePeer(target, callId);
     const offer = await pc.createOffer({ offerToReceiveAudio: true });
     await pc.setLocalDescription(offer);
 
-    const signal: CallSignalFrame = {
-      action: 'offer',
-      callId,
-      fromUserId: me,
-      targetUserId: target,
-      payload: { sdp: offer },
-    };
-    offerRetryPayloadRef.current = signal;
-    await sendSignal(signal);
-    startOfferRetry();
+    const supabase = getSupabaseClient();
+    const { error } = await supabase.from('call_invite').insert({
+      id: inviteId,
+      call_id: callId,
+      from_user_id: me,
+      target_user_id: target,
+      offer_sdp: offer,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    if (error) {
+      setStatusText(`Erreur signalisation: ${error.message}`);
+      return;
+    }
+
+    activeInviteIdRef.current = inviteId;
     setStatusText(`Appel de ${target}...`);
   };
 
@@ -432,7 +457,6 @@ export default function CallPage() {
     const me = normalizeUserId(userId);
     if (!incoming || !me) return;
     setIncomingOffer(null);
-    window.sessionStorage.removeItem(PENDING_OFFER_KEY);
 
     const pc = await ensurePeer(incoming.fromUserId, incoming.callId);
     await pc.setRemoteDescription(incoming.sdp);
@@ -440,46 +464,46 @@ export default function CallPage() {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
-    await sendSignal({
-      action: 'answer',
-      callId: incoming.callId,
-      fromUserId: me,
-      targetUserId: incoming.fromUserId,
-      payload: { sdp: answer },
-    });
+    const supabase = getSupabaseClient();
+    const { error } = await supabase
+      .from('call_invite')
+      .update({
+        status: 'accepted',
+        answer_sdp: answer,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', incoming.inviteId);
+    if (error) {
+      setStatusText(`Erreur reponse: ${error.message}`);
+      return;
+    }
+
+    activeInviteIdRef.current = incoming.inviteId;
     setStatusText(`Connexion avec ${incoming.fromUserId}...`);
   };
 
   const rejectIncoming = async () => {
     const incoming = incomingOffer;
-    const me = normalizeUserId(userId);
-    if (!incoming || !me) return;
-    await sendSignal({
-      action: 'reject',
-      callId: incoming.callId,
-      fromUserId: me,
-      targetUserId: incoming.fromUserId,
-    });
+    if (!incoming) return;
+    const supabase = getSupabaseClient();
+    await supabase
+      .from('call_invite')
+      .update({ status: 'rejected', updated_at: new Date().toISOString() })
+      .eq('id', incoming.inviteId);
     setIncomingOffer(null);
-    window.sessionStorage.removeItem(PENDING_OFFER_KEY);
     setStatusText('Appel refuse');
   };
 
   const endCall = async () => {
-    const me = normalizeUserId(userId);
-    const target = activeTargetRef.current;
-    const callId = activeCallIdRef.current;
-    if (me && target && callId) {
-      await sendSignal({
-        action: 'reject',
-        callId,
-        fromUserId: me,
-        targetUserId: target,
-      });
+    const inviteId = activeInviteIdRef.current;
+    if (inviteId) {
+      const supabase = getSupabaseClient();
+      await supabase
+        .from('call_invite')
+        .update({ status: 'ended', updated_at: new Date().toISOString() })
+        .eq('id', inviteId);
     }
-    stopOfferRetry();
     teardownPeer();
-    window.sessionStorage.removeItem(PENDING_OFFER_KEY);
     setStatusText('Appel termine');
   };
 
@@ -489,7 +513,7 @@ export default function CallPage() {
     <SecurityShell userId={userId}>
       <main className="glass-card call-screen">
         <h1>Appel vocal</h1>
-        <p className="muted-text">Connexion rapide + modificateur de voix audible.</p>
+        <p className="muted-text">Un appelle, l&apos;autre decroche. Signalisation persistante.</p>
         <input
           className="glass-input"
           value={targetId}
@@ -499,11 +523,7 @@ export default function CallPage() {
 
         <label className="field">
           <span>Modificateur de voix</span>
-          <select
-            className="glass-input"
-            value={voicePreset}
-            onChange={(e) => setVoicePreset(e.target.value as VoicePreset)}
-          >
+          <select className="glass-input" value={voicePreset} onChange={(e) => setVoicePreset(e.target.value as VoicePreset)}>
             <option value="normal">Normal</option>
             <option value="ghost">Ghost</option>
             <option value="robot">Robot</option>
@@ -537,8 +557,4 @@ export default function CallPage() {
       </main>
     </SecurityShell>
   );
-}
-
-function normalizeUserId(value: string | null | undefined): string {
-  return (value ?? '').trim().toLowerCase();
 }

@@ -50,11 +50,28 @@ create unique index if not exists uniq_fr_pending_pair
   on friend_request(requester_id, target_user_id)
   where status = 'pending';
 
+create table if not exists call_invite (
+  id text primary key,
+  call_id text not null unique,
+  from_user_id text not null references app_user(id) on delete cascade,
+  target_user_id text not null references app_user(id) on delete cascade,
+  offer_sdp jsonb not null,
+  answer_sdp jsonb null,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'rejected', 'ended')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_call_invite_target_status on call_invite(target_user_id, status, created_at desc);
+create index if not exists idx_call_invite_from_status on call_invite(from_user_id, status, created_at desc);
+
 alter table app_user disable row level security;
 alter table conversation disable row level security;
 alter table conversation_member disable row level security;
 alter table message disable row level security;
 alter table friend_request disable row level security;
+alter table call_invite disable row level security;
 
 alter publication supabase_realtime add table message;
 alter publication supabase_realtime add table friend_request;
+alter publication supabase_realtime add table call_invite;
