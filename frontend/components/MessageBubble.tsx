@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 
 type VoicePayload = {
   mimeType: string;
@@ -27,6 +27,8 @@ function b64ToBytes(base64: string): Uint8Array {
 
 export default function MessageBubble({ kind, text, voice, mine, createdAt, status = 'sent', expiresAt }: Props) {
   const [isExpired, setIsExpired] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const voiceAudioId = useId();
 
   useEffect(() => {
     if (!expiresAt) return;
@@ -61,7 +63,31 @@ export default function MessageBubble({ kind, text, voice, mine, createdAt, stat
       {kind === 'text' && <p className="message-text">{text}</p>}
       {kind === 'voice' && voice && voiceUrl && (
         <div className="voice-message">
-          <audio controls preload="metadata" src={voiceUrl} />
+          <button
+            type="button"
+            className="voice-play-btn"
+            aria-label={playing ? 'Pause vocal' : 'Lire vocal'}
+            onClick={() => {
+              const audio = document.getElementById(voiceAudioId) as HTMLAudioElement | null;
+              if (!audio) return;
+              if (audio.paused) {
+                void audio.play();
+              } else {
+                audio.pause();
+              }
+            }}
+          >
+            <VoiceIcon />
+          </button>
+          <audio
+            id={voiceAudioId}
+            controls
+            preload="metadata"
+            src={voiceUrl}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onEnded={() => setPlaying(false)}
+          />
           <span>{Math.max(1, Math.round((voice.durationMs || 0) / 1000))}s</span>
         </div>
       )}
@@ -70,5 +96,13 @@ export default function MessageBubble({ kind, text, voice, mine, createdAt, stat
         {statusLabel && <span className="message-status">{statusLabel}</span>}
       </div>
     </div>
+  );
+}
+
+function VoiceIcon() {
+  return (
+    <svg className="icon-svg voice-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 1 1-6 0V6a3 3 0 0 1 3-3Zm-6 9a1 1 0 0 1 1 1 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V22h2a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2h2v-2.07A7 7 0 0 1 5 13a1 1 0 0 1 1-1Z" />
+    </svg>
   );
 }

@@ -528,8 +528,44 @@ select {
 
 .voice-message {
   display: grid;
+  grid-template-columns: 44px 1fr auto;
+  align-items: center;
   gap: 4px;
   min-width: 0;
+}
+
+.voice-play-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(214, 233, 255, 0.5);
+  background: rgba(30, 52, 78, 0.82);
+  color: #f4f9ff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: box-shadow 120ms ease, border-color 120ms ease, transform 120ms ease, background 120ms ease;
+}
+
+.voice-play-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(151, 204, 255, 0.9);
+  box-shadow: 0 0 0 3px rgba(90, 162, 255, 0.28), 0 8px 20px rgba(33, 75, 122, 0.42);
+  background: rgba(34, 62, 94, 0.9);
+}
+
+.voice-play-btn:focus-visible {
+  outline: none;
+  border-color: rgba(157, 188, 255, 0.95);
+  box-shadow: 0 0 0 3px rgba(123, 128, 255, 0.36), 0 8px 20px rgba(47, 62, 131, 0.42);
+}
+
+.voice-icon {
+  width: 24px;
+  height: 24px;
+  fill: #f7fbff;
 }
 
 .voice-message audio {
