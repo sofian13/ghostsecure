@@ -2,22 +2,16 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let client: SupabaseClient | null = null;
 
-type SupabaseEnvName = 'NEXT_PUBLIC_SUPABASE_URL' | 'NEXT_PUBLIC_SUPABASE_ANON_KEY';
-
 export type SupabaseStatus = {
   configured: boolean;
   connected: boolean;
   message: string;
 };
 
-function getEnv(name: SupabaseEnvName): string {
-  return process.env[name] ?? '';
-}
-
-function readConfig(): { url: string; anonKey: string; missing: SupabaseEnvName[] } {
-  const url = getEnv('NEXT_PUBLIC_SUPABASE_URL');
-  const anonKey = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-  const missing: SupabaseEnvName[] = [];
+function readConfig(): { url: string; anonKey: string; missing: string[] } {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  const missing: string[] = [];
   if (!url) missing.push('NEXT_PUBLIC_SUPABASE_URL');
   if (!anonKey) missing.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
   return { url, anonKey, missing };
