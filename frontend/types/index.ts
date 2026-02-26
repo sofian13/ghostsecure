@@ -12,8 +12,11 @@ export type UserProfile = {
 
 export type Conversation = {
   id: string;
+  kind: 'direct' | 'group';
+  title: string | null;
+  memberCount: number;
   peerId: string;
-  peerPublicKey: string;
+  peerPublicKey: string | null;
   updatedAt: string;
 };
 
@@ -29,5 +32,7 @@ export type EncryptedMessage = {
 
 export type ConversationDetail = {
   id: string;
+  kind: 'direct' | 'group';
+  title: string | null;
   participants: UserProfile[];
 };

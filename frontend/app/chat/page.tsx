@@ -7,6 +7,7 @@ import MobileTabs from '@/components/MobileTabs';
 import { getSession } from '@/lib/session';
 import {
   acceptFriendRequest,
+  createGroupConversation,
   fetchConversations,
   fetchIncomingFriendRequests,
   fetchMessages,
@@ -31,6 +32,9 @@ export default function ChatListPage() {
   const [previews, setPreviews] = useState<Record<string, ConversationPreview>>({});
   const [search, setSearch] = useState('');
   const [peerUserId, setPeerUserId] = useState('');
+  const [sheetMode, setSheetMode] = useState<'direct' | 'group'>('direct');
+  const [groupTitle, setGroupTitle] = useState('');
+  const [groupMembers, setGroupMembers] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [friendStatus, setFriendStatus] = useState<string | null>(null);
@@ -117,11 +121,28 @@ export default function ChatListPage() {
 
   const onSendFriendRequest = async (e: FormEvent) => {
     e.preventDefault();
-    if (!session || !peerUserId.trim()) return;
+    if (!session) return;
     try {
+      if (sheetMode === 'group') {
+        const members = groupMembers
+          .split(',')
+          .map((id) => id.trim().toLowerCase())
+          .filter((id) => id !== '');
+        const conv = await createGroupConversation(session, groupTitle, members);
+        setFriendStatus(`Groupe ${groupTitle.trim()} cree`);
+        setGroupTitle('');
+        setGroupMembers('');
+        setSheetOpen(false);
+        await loadConversationsAndPreview(session);
+        router.push(`/chat/${encodeURIComponent(conv.id)}`);
+        return;
+      }
+
+      if (!peerUserId.trim()) return;
       await sendFriendRequest(session, peerUserId.trim());
       setFriendStatus(`Demande envoyee a ${peerUserId.trim().toLowerCase()}`);
       setPeerUserId('');
+      setSheetMode('direct');
       setSheetOpen(false);
       await loadConversationsAndPreview(session);
       await loadFriendRequests(session);
@@ -147,7 +168,8 @@ export default function ChatListPage() {
     if (!term) return conversations;
     return conversations.filter((conv) => {
       const preview = previews[conv.id]?.text ?? '';
-      return conv.peerId.toLowerCase().includes(term) || preview.toLowerCase().includes(term);
+      const title = (conv.title ?? '').toLowerCase();
+      return conv.peerId.toLowerCase().includes(term) || title.includes(term) || preview.toLowerCase().includes(term);
     });
   }, [conversations, previews, search]);
 
@@ -223,11 +245,11 @@ export default function ChatListPage() {
                   <div className="chat-avatar" aria-hidden="true">{conv.peerId.slice(0, 1).toUpperCase()}</div>
                   <div className="chat-content">
                     <div className="chat-topline">
-                      <strong>{conv.peerId}</strong>
+                      <strong>{conv.kind === 'group' ? (conv.title ?? 'Groupe') : conv.peerId}</strong>
                       <span>{formatHour(preview?.at ?? conv.updatedAt)}</span>
                     </div>
                     <div className="chat-bottomline">
-                      <p>{preview?.text ?? 'Message chiffre'}</p>
+                      <p>{conv.kind === 'group' ? `Groupe - ${conv.memberCount} membres` : preview?.text ?? 'Message chiffre'}</p>
                     </div>
                   </div>
                 </button>
@@ -243,6 +265,23 @@ export default function ChatListPage() {
           <div className="sheet-backdrop" onClick={() => setSheetOpen(false)}>
             <form className="sheet" onSubmit={onSendFriendRequest} onClick={(e) => e.stopPropagation()}>
               <h2>Nouveau chat</h2>
+              <div className="row">
+                <button
+                  type="button"
+                  className={sheetMode === 'direct' ? 'ghost-primary' : 'ghost-secondary'}
+                  onClick={() => setSheetMode('direct')}
+                >
+                  Ami
+                </button>
+                <button
+                  type="button"
+                  className={sheetMode === 'group' ? 'ghost-primary' : 'ghost-secondary'}
+                  onClick={() => setSheetMode('group')}
+                >
+                  Groupe
+                </button>
+              </div>
+              {sheetMode === 'direct' ? (
               <label className="field">
                 <span>ID utilisateur</span>
                 <input
@@ -252,12 +291,34 @@ export default function ChatListPage() {
                   placeholder="ex: ghost_23"
                 />
               </label>
+              ) : (
+                <>
+                  <label className="field">
+                    <span>Nom du groupe</span>
+                    <input
+                      className="mobile-input"
+                      value={groupTitle}
+                      onChange={(e) => setGroupTitle(e.target.value)}
+                      placeholder="ex: Equipe projet"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Membres (IDs, separes par virgule)</span>
+                    <input
+                      className="mobile-input"
+                      value={groupMembers}
+                      onChange={(e) => setGroupMembers(e.target.value)}
+                      placeholder="ex: alice,bob,charlie"
+                    />
+                  </label>
+                </>
+              )}
               <div className="row">
                 <button type="button" className="ghost-secondary" onClick={() => setSheetOpen(false)}>
                   Annuler
                 </button>
                 <button type="submit" className="ghost-primary">
-                  Envoyer
+                  {sheetMode === 'group' ? 'Creer' : 'Envoyer'}
                 </button>
               </div>
             </form>

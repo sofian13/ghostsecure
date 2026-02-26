@@ -36,35 +36,46 @@ class ConversationController
             return $this->json->error('Unauthorized.', 401);
         }
         $rows = $this->em->getConnection()->fetchAllAssociative(
-            'SELECT c.id, MAX(m.created_at) AS updated_at
+            'SELECT c.id, c.kind, c.title, MAX(m.created_at) AS updated_at,
+                    COUNT(DISTINCT cm_all.user_id) AS member_count
              FROM conversation c
              INNER JOIN conversation_member cm ON cm.conversation_id = c.id
+             INNER JOIN conversation_member cm_all ON cm_all.conversation_id = c.id
              LEFT JOIN message m ON m.conversation_id = c.id
              WHERE cm.user_id = :uid
-             GROUP BY c.id
+             GROUP BY c.id, c.kind, c.title
              ORDER BY updated_at DESC NULLS LAST, c.id DESC',
             ['uid' => $me->getId()]
         );
 
         $result = [];
         foreach ($rows as $row) {
-            $peer = $this->em->getConnection()->fetchAssociative(
-                'SELECT u.id, u.public_key
-                 FROM conversation_member cm
-                 INNER JOIN app_user u ON u.id = cm.user_id
-                 WHERE cm.conversation_id = :cid AND cm.user_id != :uid
-                 LIMIT 1',
-                ['cid' => $row['id'], 'uid' => $me->getId()]
-            );
-
-            if (!$peer) {
-                continue;
+            $isGroup = ($row['kind'] ?? Conversation::KIND_DIRECT) === Conversation::KIND_GROUP;
+            $peer = null;
+            if (!$isGroup) {
+                $peer = $this->em->getConnection()->fetchAssociative(
+                    'SELECT u.id, u.public_key
+                     FROM conversation_member cm
+                     INNER JOIN app_user u ON u.id = cm.user_id
+                     WHERE cm.conversation_id = :cid AND cm.user_id != :uid
+                     LIMIT 1',
+                    ['cid' => $row['id'], 'uid' => $me->getId()]
+                );
+                if (!$peer) {
+                    continue;
+                }
             }
+
+            $groupLabel = trim((string) ($row['title'] ?? ''));
+            $memberCount = (int) ($row['member_count'] ?? 0);
 
             $result[] = [
                 'id' => $row['id'],
-                'peerId' => $peer['id'],
-                'peerPublicKey' => $peer['public_key'],
+                'kind' => $isGroup ? Conversation::KIND_GROUP : Conversation::KIND_DIRECT,
+                'title' => $isGroup ? ($groupLabel !== '' ? $groupLabel : 'Groupe') : null,
+                'memberCount' => $memberCount,
+                'peerId' => $isGroup ? ($groupLabel !== '' ? $groupLabel : 'Groupe') : $peer['id'],
+                'peerPublicKey' => $isGroup ? null : $peer['public_key'],
                 'updatedAt' => $row['updated_at'] ?? (new \DateTimeImmutable())->format(DATE_ATOM),
             ];
         }
@@ -84,46 +95,16 @@ class ConversationController
             return $this->json->error('Unauthorized.', 401);
         }
         $payload = json_decode($request->getContent(), true);
-        $peerUserId = trim((string) ($payload['peerUserId'] ?? ''));
-        if ($peerUserId === '') {
-            return $this->json->error('peerUserId is required.', 422);
+        if (!is_array($payload)) {
+            return $this->json->error('Invalid JSON body.', 400);
         }
 
-        $peer = $this->em->getRepository(User::class)->find($peerUserId);
-        if (!$peer instanceof User) {
-            return $this->json->error('Peer not found.', 404);
+        $kind = trim((string) ($payload['kind'] ?? Conversation::KIND_DIRECT));
+        if ($kind === Conversation::KIND_GROUP) {
+            return $this->createGroupConversation($me, $payload);
         }
 
-        $existing = $this->em->getConnection()->fetchOne(
-            'SELECT cm1.conversation_id
-             FROM conversation_member cm1
-             INNER JOIN conversation_member cm2 ON cm1.conversation_id = cm2.conversation_id
-             WHERE cm1.user_id = :u1 AND cm2.user_id = :u2
-             LIMIT 1',
-            ['u1' => $me->getId(), 'u2' => $peer->getId()]
-        );
-
-        if (is_string($existing)) {
-            return $this->json->ok([
-                'id' => $existing,
-                'peerId' => $peer->getId(),
-                'peerPublicKey' => $peer->getPublicKey(),
-                'updatedAt' => (new \DateTimeImmutable())->format(DATE_ATOM),
-            ]);
-        }
-
-        $conversation = new Conversation(self::uuid());
-        $this->em->persist($conversation);
-        $this->em->persist(new ConversationMember($conversation, $me));
-        $this->em->persist(new ConversationMember($conversation, $peer));
-        $this->em->flush();
-
-        return $this->json->ok([
-            'id' => $conversation->getId(),
-            'peerId' => $peer->getId(),
-            'peerPublicKey' => $peer->getPublicKey(),
-            'updatedAt' => (new \DateTimeImmutable())->format(DATE_ATOM),
-        ], 201);
+        return $this->createDirectConversation($me, $payload);
     }
 
     #[Route('/conversations/{id}', name: 'api_conversations_detail', methods: ['GET', 'OPTIONS'])]
@@ -153,7 +134,110 @@ class ConversationController
             'publicKey' => $row['public_key'],
         ], $rows);
 
-        return $this->json->ok(['id' => $id, 'participants' => $participants]);
+        $conversation = $this->em->getRepository(Conversation::class)->find($id);
+        if (!$conversation instanceof Conversation) {
+            return $this->json->error('Conversation not found.', 404);
+        }
+
+        return $this->json->ok([
+            'id' => $id,
+            'kind' => $conversation->getKind(),
+            'title' => $conversation->getTitle(),
+            'participants' => $participants,
+        ]);
+    }
+
+    #[Route('/conversations/{id}/members', name: 'api_conversations_add_member', methods: ['POST', 'OPTIONS'])]
+    public function addMember(Request $request, string $id)
+    {
+        if ($request->isMethod('OPTIONS')) {
+            return $this->json->ok(['ok' => true]);
+        }
+
+        $me = $this->auth->requireUser($request);
+        if (!$me instanceof User) {
+            return $this->json->error('Unauthorized.', 401);
+        }
+        if (!$this->hasAccess($me->getId(), $id)) {
+            return $this->json->error('Forbidden.', 403);
+        }
+
+        $conversation = $this->em->getRepository(Conversation::class)->find($id);
+        if (!$conversation instanceof Conversation) {
+            return $this->json->error('Conversation not found.', 404);
+        }
+        if (!$conversation->isGroup()) {
+            return $this->json->error('Only group conversations support member management.', 422);
+        }
+
+        $payload = json_decode($request->getContent(), true);
+        if (!is_array($payload)) {
+            return $this->json->error('Invalid JSON body.', 400);
+        }
+        $newUserId = strtolower(trim((string) ($payload['userId'] ?? '')));
+        if ($newUserId === '') {
+            return $this->json->error('userId is required.', 422);
+        }
+
+        $newUser = $this->em->getRepository(User::class)->find($newUserId);
+        if (!$newUser instanceof User) {
+            return $this->json->error('User not found.', 404);
+        }
+
+        $exists = $this->em->getConnection()->fetchOne(
+            'SELECT 1 FROM conversation_member WHERE conversation_id = :cid AND user_id = :uid LIMIT 1',
+            ['cid' => $conversation->getId(), 'uid' => $newUser->getId()]
+        );
+        if (!$exists) {
+            $this->em->persist(new ConversationMember($conversation, $newUser));
+            $this->em->flush();
+        }
+
+        return $this->json->ok(['ok' => true]);
+    }
+
+    #[Route('/conversations/{id}/members/me', name: 'api_conversations_leave', methods: ['DELETE', 'OPTIONS'])]
+    public function leaveGroup(Request $request, string $id)
+    {
+        if ($request->isMethod('OPTIONS')) {
+            return $this->json->ok(['ok' => true]);
+        }
+
+        $me = $this->auth->requireUser($request);
+        if (!$me instanceof User) {
+            return $this->json->error('Unauthorized.', 401);
+        }
+        if (!$this->hasAccess($me->getId(), $id)) {
+            return $this->json->error('Forbidden.', 403);
+        }
+
+        $conversation = $this->em->getRepository(Conversation::class)->find($id);
+        if (!$conversation instanceof Conversation) {
+            return $this->json->error('Conversation not found.', 404);
+        }
+        if (!$conversation->isGroup()) {
+            return $this->json->error('Only group conversations can be left.', 422);
+        }
+
+        $member = $this->em->getRepository(ConversationMember::class)->findOneBy([
+            'conversation' => $conversation,
+            'user' => $me,
+        ]);
+        if ($member instanceof ConversationMember) {
+            $this->em->remove($member);
+            $this->em->flush();
+        }
+
+        $remaining = (int) $this->em->getConnection()->fetchOne(
+            'SELECT COUNT(*) FROM conversation_member WHERE conversation_id = :cid',
+            ['cid' => $conversation->getId()]
+        );
+        if ($remaining === 0) {
+            $this->em->remove($conversation);
+            $this->em->flush();
+        }
+
+        return $this->json->ok(['ok' => true]);
     }
 
     #[Route('/conversations/{id}/messages', name: 'api_messages_list', methods: ['GET', 'OPTIONS'])]
@@ -257,5 +341,107 @@ class ConversationController
         $data[8] = chr((ord($data[8]) & 0x3f) | 0x80);
 
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
+    }
+
+    private function createDirectConversation(User $me, array $payload)
+    {
+        $peerUserId = strtolower(trim((string) ($payload['peerUserId'] ?? '')));
+        if ($peerUserId === '') {
+            return $this->json->error('peerUserId is required.', 422);
+        }
+
+        $peer = $this->em->getRepository(User::class)->find($peerUserId);
+        if (!$peer instanceof User) {
+            return $this->json->error('Peer not found.', 404);
+        }
+
+        $existing = $this->em->getConnection()->fetchOne(
+            'SELECT c.id
+             FROM conversation c
+             INNER JOIN conversation_member cm1 ON cm1.conversation_id = c.id
+             INNER JOIN conversation_member cm2 ON cm2.conversation_id = c.id
+             WHERE c.kind = :kind
+               AND cm1.user_id = :u1
+               AND cm2.user_id = :u2
+               AND (SELECT COUNT(*) FROM conversation_member cm WHERE cm.conversation_id = c.id) = 2
+             LIMIT 1',
+            ['kind' => Conversation::KIND_DIRECT, 'u1' => $me->getId(), 'u2' => $peer->getId()]
+        );
+
+        if (is_string($existing)) {
+            return $this->json->ok([
+                'id' => $existing,
+                'kind' => Conversation::KIND_DIRECT,
+                'title' => null,
+                'memberCount' => 2,
+                'peerId' => $peer->getId(),
+                'peerPublicKey' => $peer->getPublicKey(),
+                'updatedAt' => (new \DateTimeImmutable())->format(DATE_ATOM),
+            ]);
+        }
+
+        $conversation = new Conversation(self::uuid(), Conversation::KIND_DIRECT, null);
+        $this->em->persist($conversation);
+        $this->em->persist(new ConversationMember($conversation, $me));
+        $this->em->persist(new ConversationMember($conversation, $peer));
+        $this->em->flush();
+
+        return $this->json->ok([
+            'id' => $conversation->getId(),
+            'kind' => Conversation::KIND_DIRECT,
+            'title' => null,
+            'memberCount' => 2,
+            'peerId' => $peer->getId(),
+            'peerPublicKey' => $peer->getPublicKey(),
+            'updatedAt' => (new \DateTimeImmutable())->format(DATE_ATOM),
+        ], 201);
+    }
+
+    private function createGroupConversation(User $me, array $payload)
+    {
+        $title = trim((string) ($payload['title'] ?? ''));
+        if ($title === '') {
+            return $this->json->error('title is required for group.', 422);
+        }
+        $title = substr($title, 0, 120);
+
+        $memberIds = $payload['memberUserIds'] ?? [];
+        if (!is_array($memberIds)) {
+            return $this->json->error('memberUserIds must be an array.', 422);
+        }
+
+        $uniqueIds = [$me->getId() => true];
+        foreach ($memberIds as $memberId) {
+            $normalized = strtolower(trim((string) $memberId));
+            if ($normalized !== '') {
+                $uniqueIds[$normalized] = true;
+            }
+        }
+
+        if (count($uniqueIds) < 2) {
+            return $this->json->error('A group must contain at least two members.', 422);
+        }
+
+        $users = $this->em->getRepository(User::class)->findBy(['id' => array_keys($uniqueIds)]);
+        if (count($users) !== count($uniqueIds)) {
+            return $this->json->error('One or more users were not found.', 404);
+        }
+
+        $conversation = new Conversation(self::uuid(), Conversation::KIND_GROUP, $title);
+        $this->em->persist($conversation);
+        foreach ($users as $user) {
+            $this->em->persist(new ConversationMember($conversation, $user));
+        }
+        $this->em->flush();
+
+        return $this->json->ok([
+            'id' => $conversation->getId(),
+            'kind' => Conversation::KIND_GROUP,
+            'title' => $title,
+            'memberCount' => count($uniqueIds),
+            'peerId' => $title,
+            'peerPublicKey' => null,
+            'updatedAt' => (new \DateTimeImmutable())->format(DATE_ATOM),
+        ], 201);
     }
 }

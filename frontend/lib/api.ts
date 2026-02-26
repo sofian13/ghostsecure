@@ -115,6 +115,22 @@ export async function createConversation(session: Session, peerUserId: string): 
   );
 }
 
+export async function createGroupConversation(
+  session: Session,
+  title: string,
+  memberUserIds: string[]
+): Promise<Conversation> {
+  const members = memberUserIds.map(normalizeUserId).filter((id) => id !== '');
+  return apiRequest<Conversation>(
+    '/api/conversations',
+    {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'group', title: title.trim(), memberUserIds: members }),
+    },
+    session
+  );
+}
+
 export async function fetchConversationDetail(session: Session, conversationId: string): Promise<ConversationDetail> {
   return apiRequest<ConversationDetail>(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: 'GET' }, session);
 }
@@ -146,6 +162,25 @@ export async function sendMessage(
       method: 'POST',
       body: JSON.stringify(payload),
     },
+    session
+  );
+}
+
+export async function addGroupMember(session: Session, conversationId: string, userId: string): Promise<void> {
+  await apiRequest<{ ok: boolean }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/members`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ userId: normalizeUserId(userId) }),
+    },
+    session
+  );
+}
+
+export async function leaveGroupConversation(session: Session, conversationId: string): Promise<void> {
+  await apiRequest<{ ok: boolean }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/members/me`,
+    { method: 'DELETE' },
     session
   );
 }

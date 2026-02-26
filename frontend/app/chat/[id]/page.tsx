@@ -6,7 +6,7 @@ import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
 import MobileTabs from '@/components/MobileTabs';
 import { getSession } from '@/lib/session';
-import { fetchConversationDetail, fetchMessages, sendMessage } from '@/lib/api';
+import { addGroupMember, fetchConversationDetail, fetchMessages, leaveGroupConversation, sendMessage } from '@/lib/api';
 import { encryptForParticipants } from '@/lib/crypto';
 import { decryptForUser, type DecryptedMessage } from '@/lib/messages';
 import { useRealtime } from '@/lib/useRealtime';
@@ -23,6 +23,7 @@ export default function ConversationPage() {
 
   const [session, setSessionState] = useState<Session | null>(null);
   const [peerId, setPeerId] = useState<string>('');
+  const [conversationKind, setConversationKind] = useState<'direct' | 'group'>('direct');
   const [messages, setMessages] = useState<DecryptedMessage[]>([]);
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +55,11 @@ export default function ConversationPage() {
 
   const loadContext = async (s: Session) => {
     const detail = await fetchConversationDetail(s, conversationId);
+    setConversationKind(detail.kind);
+    if (detail.kind === 'group') {
+      setPeerId(detail.title?.trim() || 'Groupe');
+      return;
+    }
     const peer = detail.participants.find((p) => p.id !== s.userId)?.id ?? 'Contact';
     setPeerId(peer);
   };
@@ -348,6 +354,7 @@ export default function ConversationPage() {
             className="icon-btn"
             onClick={() => router.push(`/call?target=${encodeURIComponent(peerId)}&autocall=1`)}
             aria-label="Appeler"
+            disabled={conversationKind === 'group'}
           >
             <PhoneIcon />
           </button>
@@ -357,6 +364,48 @@ export default function ConversationPage() {
         </header>
 
         <div className="security-pill">Chiffrement de bout en bout active</div>
+
+        {conversationKind === 'group' && (
+          <section className="inline-card">
+            <div className="row">
+              <button
+                type="button"
+                className="ghost-secondary"
+                onClick={async () => {
+                  if (!session) return;
+                  const nextUserId = window.prompt('ID utilisateur a ajouter au groupe');
+                  if (!nextUserId?.trim()) return;
+                  try {
+                    await addGroupMember(session, conversationId, nextUserId.trim());
+                    await loadContext(session);
+                    setStatus(`${nextUserId.trim().toLowerCase()} ajoute au groupe`);
+                  } catch (err) {
+                    setError(normalizeError(err, 'Erreur ajout membre'));
+                  }
+                }}
+              >
+                Ajouter membre
+              </button>
+              <button
+                type="button"
+                className="ghost-secondary"
+                onClick={async () => {
+                  if (!session) return;
+                  const ok = window.confirm('Quitter ce groupe ?');
+                  if (!ok) return;
+                  try {
+                    await leaveGroupConversation(session, conversationId);
+                    router.push('/chat');
+                  } catch (err) {
+                    setError(normalizeError(err, 'Erreur sortie groupe'));
+                  }
+                }}
+              >
+                Quitter groupe
+              </button>
+            </div>
+          </section>
+        )}
 
         {incomingCallFrom && (
           <div className="incoming-banner">
