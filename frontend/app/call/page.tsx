@@ -638,8 +638,9 @@ export default function CallPage() {
       setStatusText(`Connexion avec ${incoming.fromUserId}...`);
       void finalizeAnswerSdp(incoming.inviteId);
       if (userId) await loadHistory(userId);
-    } catch {
-      setStatusText('Echec de reponse. Reessayez.');
+    } catch (e) {
+      const detail = e instanceof Error ? `${e.name}: ${e.message}` : 'Erreur inconnue';
+      setStatusText(`Echec de reponse (${detail}). Reessayez.`);
       teardownPeer();
     } finally {
       acceptingRef.current = false;
