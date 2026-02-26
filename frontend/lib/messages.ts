@@ -22,7 +22,10 @@ export type DecryptedMessage = {
 };
 
 export async function decryptForUser(userId: string, message: EncryptedMessage): Promise<DecryptedMessage | null> {
-  const wrappedKey = message.wrappedKeys[userId];
+  const normalizedUserId = userId.trim().toLowerCase();
+  const wrappedKey = message.wrappedKeys[userId]
+    ?? message.wrappedKeys[normalizedUserId]
+    ?? Object.entries(message.wrappedKeys).find(([id]) => id.trim().toLowerCase() === normalizedUserId)?.[1];
   if (!wrappedKey) return null;
 
   try {

@@ -20,7 +20,7 @@ export function useRealtime(session: Session | null, onMessage: (payload: unknow
   onMessageRef.current = onMessage;
 
   useEffect(() => {
-    const userId = session?.userId ?? null;
+    const userId = session?.userId.trim().toLowerCase() ?? null;
     if (!userId) return;
 
     const supabase = getSupabaseClient();
@@ -32,7 +32,8 @@ export function useRealtime(session: Session | null, onMessage: (payload: unknow
         (payload) => {
           const row = payload.new as MessageRow;
           const wrappedKeys = row.wrapped_keys ?? {};
-          if (!wrappedKeys[userId]) return;
+          const hasKey = Object.keys(wrappedKeys).some((id) => id.trim().toLowerCase() === userId);
+          if (!hasKey) return;
 
           onMessageRef.current({
             type: 'new_message',

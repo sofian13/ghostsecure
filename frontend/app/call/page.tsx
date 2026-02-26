@@ -33,6 +33,18 @@ function normalizeUserId(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase();
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, reason: string): Promise<T> {
+  let timer: number | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(reason)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) window.clearTimeout(timer);
+  }
+}
+
 function resolveIceServers(): RTCIceServer[] {
   const list: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -70,6 +82,9 @@ const LOW_BANDWIDTH_AUDIO_MAX_BITRATE = 18000;
 const ICE_PARTIAL_GATHERING_CALLER_MS = 2600;
 const ICE_PARTIAL_GATHERING_CALLEE_MS = 2200;
 const CONNECT_SLOW_NETWORK_TIMEOUT_MS = 45000;
+const CALL_SETUP_MAX_MS = 18000;
+const ANSWER_WAIT_TIMEOUT_MS = 30000;
+const REJECT_COOLDOWN_MS = 15000;
 
 export default function CallPage() {
   const router = useRouter();
@@ -96,7 +111,10 @@ export default function CallPage() {
   const answerPollRef = useRef<number | null>(null);
   const incomingPollRef = useRef<number | null>(null);
   const lastIncomingInviteRef = useRef<string | null>(null);
+  const rejectCooldownRef = useRef<Record<string, number>>({});
   const connectTimeoutRef = useRef<number | null>(null);
+  const setupTimeoutRef = useRef<number | null>(null);
+  const callStartingRef = useRef(false);
   const autoCalledRef = useRef(false);
   const autoAcceptedRef = useRef(false);
 
@@ -492,54 +510,84 @@ export default function CallPage() {
     answerPollRef.current = null;
     if (connectTimeoutRef.current) window.clearTimeout(connectTimeoutRef.current);
     connectTimeoutRef.current = null;
+    if (setupTimeoutRef.current) window.clearTimeout(setupTimeoutRef.current);
+    setupTimeoutRef.current = null;
+    callStartingRef.current = false;
     setConnected(false);
   };
 
   const startCall = async () => {
+    if (callStartingRef.current) return;
     const me = normalizeUserId(userId);
     const target = normalizeUserId(targetId);
     if (!me || !target) return;
 
-    await Promise.race([
-      cleanupOpenInvites(me, target),
-      new Promise<void>((resolve) => window.setTimeout(resolve, 700)),
-    ]);
-    teardownPeer();
-    setIncomingOffer(null);
-    setStatusText('Preparation de l appel...');
+    try {
+      callStartingRef.current = true;
+      await Promise.race([
+        cleanupOpenInvites(me, target),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 700)),
+      ]);
+      teardownPeer();
+      callStartingRef.current = true;
+      if (setupTimeoutRef.current) window.clearTimeout(setupTimeoutRef.current);
+      setupTimeoutRef.current = window.setTimeout(() => {
+        if (callStartingRef.current) setStatusText('Preparation trop longue. Verifiez micro/reseau puis reessayez.');
+      }, CALL_SETUP_MAX_MS);
+      setIncomingOffer(null);
+      setStatusText('Preparation de l appel...');
 
-    const callId = crypto.randomUUID();
-    const inviteId = crypto.randomUUID();
-    const pc = await ensurePeer(target, callId);
-    const offer = await pc.createOffer({ offerToReceiveAudio: true });
-    await pc.setLocalDescription(offer);
-    await waitIceGatheringPartial(pc, ICE_PARTIAL_GATHERING_CALLER_MS);
+      const callId = crypto.randomUUID();
+      const inviteId = crypto.randomUUID();
+      const pc = await withTimeout(
+        ensurePeer(target, callId),
+        CALL_SETUP_MAX_MS,
+        'Timeout preparation audio (micro/reseau)'
+      );
+      const offer = await pc.createOffer({ offerToReceiveAudio: true });
+      await pc.setLocalDescription(offer);
+      await waitIceGatheringPartial(pc, ICE_PARTIAL_GATHERING_CALLER_MS);
 
-    const supabase = getSupabaseClient();
-    const { error } = await supabase.from('call_invite').insert({
-      id: inviteId,
-      call_id: callId,
-      from_user_id: me,
-      target_user_id: target,
-      offer_sdp: pc.localDescription ?? offer,
-      status: 'pending',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-    if (error) {
-      setStatusText(`Erreur signalisation: ${error.message}`);
-      return;
+      const supabase = getSupabaseClient();
+      const insertResult = (await withTimeout(
+        Promise.resolve(supabase.from('call_invite').insert({
+          id: inviteId,
+          call_id: callId,
+          from_user_id: me,
+          target_user_id: target,
+          offer_sdp: pc.localDescription ?? offer,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })),
+        CALL_SETUP_MAX_MS,
+        'Timeout signalisation appel'
+      )) as { error: { message: string } | null };
+      const { error } = insertResult;
+      if (error) {
+        setStatusText(`Erreur signalisation: ${error.message}`);
+        teardownPeer();
+        return;
+      }
+      activeInviteIdRef.current = inviteId;
+      setStatusText(`Sonnerie chez ${target}...`);
+      if (connectTimeoutRef.current) window.clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = window.setTimeout(() => {
+        const state = pcRef.current?.connectionState;
+        if (state !== 'connected') setStatusText('Connexion lente. Reessayez ou ajoutez TURN dedie.');
+      }, CONNECT_SLOW_NETWORK_TIMEOUT_MS);
+      startAnswerPolling(inviteId);
+      void finalizeOfferSdp(inviteId);
+      await loadHistory(me);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Preparation appel echouee';
+      setStatusText(message);
+      teardownPeer();
+    } finally {
+      callStartingRef.current = false;
+      if (setupTimeoutRef.current) window.clearTimeout(setupTimeoutRef.current);
+      setupTimeoutRef.current = null;
     }
-    activeInviteIdRef.current = inviteId;
-    setStatusText(`Sonnerie chez ${target}...`);
-    if (connectTimeoutRef.current) window.clearTimeout(connectTimeoutRef.current);
-    connectTimeoutRef.current = window.setTimeout(() => {
-      const state = pcRef.current?.connectionState;
-      if (state !== 'connected') setStatusText('Connexion lente. Reessayez ou ajoutez TURN dedie.');
-    }, CONNECT_SLOW_NETWORK_TIMEOUT_MS);
-    startAnswerPolling(inviteId);
-    void finalizeOfferSdp(inviteId);
-    await loadHistory(me);
   };
 
   const acceptIncoming = async () => {
@@ -579,11 +627,21 @@ export default function CallPage() {
   const rejectIncoming = async () => {
     const incoming = incomingOffer;
     if (!incoming) return;
+    const me = normalizeUserId(userId);
     const supabase = getSupabaseClient();
     await supabase
       .from('call_invite')
       .update({ status: 'rejected', updated_at: new Date().toISOString() })
       .eq('id', incoming.inviteId);
+    if (me) {
+      await supabase
+        .from('call_invite')
+        .update({ status: 'rejected', updated_at: new Date().toISOString() })
+        .eq('target_user_id', me)
+        .eq('from_user_id', incoming.fromUserId)
+        .eq('status', 'pending');
+    }
+    rejectCooldownRef.current[incoming.fromUserId] = Date.now() + REJECT_COOLDOWN_MS;
     lastIncomingInviteRef.current = incoming.inviteId;
     setIncomingOffer(null);
     setStatusText('Appel refuse');
@@ -634,6 +692,8 @@ export default function CallPage() {
   function applyIncomingOffer(row: InviteRow) {
     const from = normalizeUserId(row.from_user_id);
     if (!from || row.status !== 'pending') return;
+    const cooldownUntil = rejectCooldownRef.current[from] ?? 0;
+    if (Date.now() < cooldownUntil) return;
     if (row.id === lastIncomingInviteRef.current) return;
     if (incomingOffer?.inviteId === row.id) return;
     if (activeInviteIdRef.current === row.id) return;
@@ -720,7 +780,16 @@ export default function CallPage() {
         if (answerPollRef.current) window.clearInterval(answerPollRef.current);
         answerPollRef.current = null;
       }
-      if (row.status === 'rejected' || row.status === 'ended' || Date.now() - startedAt > 30000) {
+      if (row.status === 'rejected' || row.status === 'ended' || Date.now() - startedAt > ANSWER_WAIT_TIMEOUT_MS) {
+        if (Date.now() - startedAt > ANSWER_WAIT_TIMEOUT_MS) {
+          setStatusText('Aucune reponse. Verifiez la connexion puis reessayez.');
+          void getSupabaseClient()
+            .from('call_invite')
+            .update({ status: 'ended', updated_at: new Date().toISOString() })
+            .eq('id', inviteId)
+            .eq('status', 'pending');
+          teardownPeer();
+        }
         if (answerPollRef.current) window.clearInterval(answerPollRef.current);
         answerPollRef.current = null;
       }

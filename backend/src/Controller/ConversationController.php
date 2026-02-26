@@ -171,10 +171,16 @@ class ConversationController
             return $this->json->error('Forbidden.', 403);
         }
 
-        $items = $this->em->getRepository(Message::class)->findBy(
-            ['conversation' => $this->em->getReference(Conversation::class, $id)],
-            ['createdAt' => 'ASC']
-        );
+        $conversationRef = $this->em->getReference(Conversation::class, $id);
+        $items = $this->em->createQueryBuilder()
+            ->select('m')
+            ->from(Message::class, 'm')
+            ->where('m.conversation = :conversation')
+            ->setParameter('conversation', $conversationRef)
+            ->orderBy('m.createdAt', 'ASC')
+            ->addOrderBy('m.id', 'ASC')
+            ->getQuery()
+            ->getResult();
 
         $now = new \DateTimeImmutable();
         $serialized = [];

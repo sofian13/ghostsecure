@@ -13,6 +13,8 @@ import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
 import type { EncryptedMessage, Session } from '@/types';
 
+const MESSAGE_POLL_INTERVAL_MS = 900;
+
 export default function ConversationPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -79,7 +81,7 @@ export default function ConversationPage() {
     if (!session) return;
     const id = window.setInterval(() => {
       void loadMessages(session).catch(() => null);
-    }, 3500);
+    }, MESSAGE_POLL_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, [session, conversationId]);
 
@@ -142,9 +144,10 @@ export default function ConversationPage() {
         input.trim(),
         detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
       );
-      await sendMessage(session, conversationId, { ...encrypted });
+      const sent = await sendMessage(session, conversationId, { ...encrypted });
+      const decrypted = await decryptForUser(session.userId, sent);
+      if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
       setInput('');
-      await loadMessages(session);
     } catch (err) {
       setError(normalizeError(err, 'Message non envoye'));
     }
@@ -223,9 +226,10 @@ export default function ConversationPage() {
         payload,
         detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
       );
-      await sendMessage(session, conversationId, { ...encrypted });
+      const sent = await sendMessage(session, conversationId, { ...encrypted });
+      const decrypted = await decryptForUser(session.userId, sent);
+      if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
       discardDraftVoice();
-      await loadMessages(session);
     } catch {
       setError("Erreur d'envoi vocal");
     }
@@ -257,8 +261,9 @@ export default function ConversationPage() {
         payload,
         detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
       );
-      await sendMessage(session, conversationId, { ...encrypted });
-      await loadMessages(session);
+      const sent = await sendMessage(session, conversationId, { ...encrypted });
+      const decrypted = await decryptForUser(session.userId, sent);
+      if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
     } catch {
       setError("Erreur envoi piece jointe");
     }
@@ -437,7 +442,11 @@ function normalizeError(err: unknown, fallback: string): string {
 function sortAndDedupe(items: DecryptedMessage[]): DecryptedMessage[] {
   const byId = new Map<string, DecryptedMessage>();
   for (const item of items) byId.set(item.id, item);
-  return [...byId.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  return [...byId.values()].sort((a, b) => {
+    const byCreatedAt = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+    if (byCreatedAt !== 0) return byCreatedAt;
+    return a.id.localeCompare(b.id);
+  });
 }
 
 function MicIcon() {
