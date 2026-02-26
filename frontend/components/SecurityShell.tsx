@@ -11,6 +11,7 @@ type Props = {
 export default function SecurityShell({ userId, children }: Props) {
   const [hidden, setHidden] = useState(false);
   const [manualLock, setManualLock] = useState(false);
+  const [captureAlert, setCaptureAlert] = useState(false);
 
   useEffect(() => {
     const lock = () => setHidden(true);
@@ -23,6 +24,11 @@ export default function SecurityShell({ userId, children }: Props) {
       const key = event.key.toLowerCase();
       const blockedCombo = (event.ctrlKey || event.metaKey) && ['c', 'v', 'x', 'p', 's'].includes(key);
       if (blockedCombo) event.preventDefault();
+      if (key === 'printscreen' || ((event.metaKey || event.ctrlKey) && event.shiftKey && ['3', '4', '5'].includes(key))) {
+        setHidden(true);
+        setCaptureAlert(true);
+        window.setTimeout(() => setCaptureAlert(false), 1800);
+      }
     };
 
     document.addEventListener('visibilitychange', onVisibility);
@@ -45,6 +51,83 @@ export default function SecurityShell({ userId, children }: Props) {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return;
+    const geo = navigator.geolocation as Geolocation & {
+      _ghost_getCurrentPosition?: Geolocation['getCurrentPosition'];
+      _ghost_watchPosition?: Geolocation['watchPosition'];
+    };
+    if (!geo._ghost_getCurrentPosition) {
+      geo._ghost_getCurrentPosition = geo.getCurrentPosition.bind(geo);
+      geo._ghost_watchPosition = geo.watchPosition.bind(geo);
+    }
+
+    const deny = (error?: PositionErrorCallback | null) => {
+      error?.({
+        code: 1,
+        message: 'Geolocation disabled by Ghost Secure policy.',
+        PERMISSION_DENIED: 1,
+        POSITION_UNAVAILABLE: 2,
+        TIMEOUT: 3,
+      } as GeolocationPositionError);
+    };
+
+    geo.getCurrentPosition = ((_success, error) => deny(error)) as Geolocation['getCurrentPosition'];
+    geo.watchPosition = ((_success, error) => {
+      deny(error);
+      return -1;
+    }) as Geolocation['watchPosition'];
+
+    return () => {
+      if (geo._ghost_getCurrentPosition) {
+        geo.getCurrentPosition = geo._ghost_getCurrentPosition;
+      }
+      if (geo._ghost_watchPosition) {
+        geo.watchPosition = geo._ghost_watchPosition;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let wakeLock: { release: () => Promise<void> } | null = null;
+    const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> } };
+
+    const requestWakeLock = async () => {
+      if (!nav.wakeLock || document.visibilityState !== 'visible' || hidden || manualLock) return;
+      try {
+        wakeLock = await nav.wakeLock.request('screen');
+      } catch {
+        wakeLock = null;
+      }
+    };
+
+    const releaseWakeLock = async () => {
+      if (!wakeLock) return;
+      try {
+        await wakeLock.release();
+      } catch {
+        // no-op
+      }
+      wakeLock = null;
+    };
+
+    const onVisibility = async () => {
+      if (document.visibilityState === 'visible' && !hidden && !manualLock) {
+        await requestWakeLock();
+      } else {
+        await releaseWakeLock();
+      }
+    };
+
+    void requestWakeLock();
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      void releaseWakeLock();
+    };
+  }, [hidden, manualLock]);
 
   useEffect(() => {
     const me = userId.trim().toLowerCase();
@@ -174,6 +257,7 @@ export default function SecurityShell({ userId, children }: Props) {
           </button>
         </div>
       )}
+      {captureAlert && <div className="capture-alert">Capture detectee. Affichage masque.</div>}
       <button type="button" className="ghost-btn lock-toggle" onClick={() => setManualLock((v) => !v)}>
         {manualLock ? 'Unlock' : 'Lock'}
       </button>

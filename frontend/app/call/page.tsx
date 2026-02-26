@@ -291,14 +291,31 @@ export default function CallPage() {
     } else if (preset === 'deep') {
       const lowShelf = ctx.createBiquadFilter();
       lowShelf.type = 'lowshelf';
-      lowShelf.frequency.value = 180;
-      lowShelf.gain.value = 14;
+      lowShelf.frequency.value = 200;
+      lowShelf.gain.value = 22;
+      const peaking = ctx.createBiquadFilter();
+      peaking.type = 'peaking';
+      peaking.frequency.value = 260;
+      peaking.Q.value = 1.1;
+      peaking.gain.value = 12;
       const lowpass = ctx.createBiquadFilter();
       lowpass.type = 'lowpass';
-      lowpass.frequency.value = 1200;
+      lowpass.frequency.value = 900;
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -30;
+      compressor.knee.value = 16;
+      compressor.ratio.value = 12;
+      compressor.attack.value = 0.008;
+      compressor.release.value = 0.22;
+      const shaper = ctx.createWaveShaper();
+      shaper.curve = createDistortionCurve(75);
+      shaper.oversample = '4x';
       source.connect(lowShelf);
-      lowShelf.connect(lowpass);
-      lowpass.connect(destination);
+      lowShelf.connect(peaking);
+      peaking.connect(lowpass);
+      lowpass.connect(compressor);
+      compressor.connect(shaper);
+      shaper.connect(destination);
     } else {
       source.connect(destination);
     }

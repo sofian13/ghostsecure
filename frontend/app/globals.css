@@ -801,6 +801,20 @@ select {
   z-index: 42;
 }
 
+.capture-alert {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 12px;
+  z-index: 43;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: rgba(9, 14, 22, 0.92);
+  color: var(--danger);
+  font-size: 0.82rem;
+}
+
 @media (min-width: 960px) {
   .mobile-screen {
     max-width: 860px;
