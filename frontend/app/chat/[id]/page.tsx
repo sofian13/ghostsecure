@@ -26,7 +26,6 @@ export default function ConversationPage() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('En ligne');
   const [incomingCallFrom, setIncomingCallFrom] = useState<string | null>(null);
-  const [showRecallPrompt, setShowRecallPrompt] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
   const [draftVoiceUrl, setDraftVoiceUrl] = useState<string | null>(null);
@@ -71,8 +70,10 @@ export default function ConversationPage() {
   }, [session, conversationId]);
 
   useEffect(() => {
-    setShowRecallPrompt(searchParams.get('autocall') === '1');
-  }, [searchParams]);
+    if (searchParams.get('autocall') !== '1') return;
+    if (!peerId) return;
+    router.replace(`/call?target=${encodeURIComponent(peerId)}&autocall=1`);
+  }, [searchParams, peerId, router]);
 
   useEffect(() => {
     if (!session) return;
@@ -362,27 +363,6 @@ export default function ConversationPage() {
             >
               Repondre
             </button>
-          </div>
-        )}
-
-        {showRecallPrompt && peerId && (
-          <div className="incoming-banner">
-            <p>Rappeler {peerId} ?</p>
-            <div className="row">
-              <button
-                type="button"
-                className="ghost-primary"
-                onClick={() => {
-                  setShowRecallPrompt(false);
-                  router.push(`/call?target=${encodeURIComponent(peerId)}&autocall=1`);
-                }}
-              >
-                Rappeler maintenant
-              </button>
-              <button type="button" className="ghost-secondary" onClick={() => setShowRecallPrompt(false)}>
-                Plus tard
-              </button>
-            </div>
           </div>
         )}
 
