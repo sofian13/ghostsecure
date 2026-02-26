@@ -8,7 +8,7 @@ import { createConversation } from '@/lib/api';
 import { getSession } from '@/lib/session';
 import { getSupabaseClient } from '@/lib/supabase';
 
-type VoicePreset = 'normal' | 'ghost' | 'robot' | 'deep';
+type VoicePreset = 'normal' | 'ghost' | 'robot' | 'deep' | 'vader';
 
 type InviteRow = {
   id: string;
@@ -321,6 +321,67 @@ export default function CallPage() {
       lowpass.connect(compressor);
       compressor.connect(shaper);
       shaper.connect(destination);
+    } else if (preset === 'vader') {
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 55;
+
+      const lowShelf = ctx.createBiquadFilter();
+      lowShelf.type = 'lowshelf';
+      lowShelf.frequency.value = 160;
+      lowShelf.gain.value = 26;
+
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = 520;
+      lowpass.Q.value = 0.9;
+
+      const peaking = ctx.createBiquadFilter();
+      peaking.type = 'peaking';
+      peaking.frequency.value = 115;
+      peaking.Q.value = 1.4;
+      peaking.gain.value = 18;
+
+      const ring = ctx.createGain();
+      ring.gain.value = 0.8;
+      const lfo = ctx.createOscillator();
+      const lfoDepth = ctx.createGain();
+      lfo.type = 'sawtooth';
+      lfo.frequency.value = 36;
+      lfoDepth.gain.value = 0.55;
+      lfo.connect(lfoDepth);
+      lfoDepth.connect(ring.gain);
+      lfo.start();
+      cleanup.push(() => lfo.stop());
+
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -36;
+      compressor.knee.value = 20;
+      compressor.ratio.value = 14;
+      compressor.attack.value = 0.004;
+      compressor.release.value = 0.2;
+
+      const shaper = ctx.createWaveShaper();
+      shaper.curve = createDistortionCurve(120);
+      shaper.oversample = '4x';
+
+      const delay = ctx.createDelay(0.08);
+      delay.delayTime.value = 0.028;
+      const delayGain = ctx.createGain();
+      delayGain.gain.value = 0.24;
+      delay.connect(delayGain);
+      delayGain.connect(delay);
+
+      source.connect(highpass);
+      highpass.connect(lowShelf);
+      lowShelf.connect(peaking);
+      peaking.connect(lowpass);
+      lowpass.connect(ring);
+      ring.connect(compressor);
+      compressor.connect(shaper);
+      shaper.connect(destination);
+      shaper.connect(delay);
+      delay.connect(destination);
     } else {
       source.connect(destination);
     }
@@ -680,6 +741,7 @@ export default function CallPage() {
               <option value="ghost">Ghost</option>
               <option value="robot">Robot</option>
               <option value="deep">Deep</option>
+              <option value="vader">Vader</option>
             </select>
           </label>
 
