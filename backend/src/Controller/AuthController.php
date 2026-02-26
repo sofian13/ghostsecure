@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Entity\User;
 use App\Service\AuthService;
+use App\Service\AuthThrottleService;
 use App\Service\JsonFactory;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -15,6 +16,7 @@ class AuthController
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly AuthService $auth,
+        private readonly AuthThrottleService $throttle,
         private readonly JsonFactory $json
     ) {
     }
@@ -24,6 +26,12 @@ class AuthController
     {
         if ($request->isMethod('OPTIONS')) {
             return $this->json->ok(['ok' => true]);
+        }
+
+        $ip = $this->extractClientIp($request);
+        $globalKey = sprintf('ip:%s', $ip);
+        if (!$this->throttle->isAllowed('register', $globalKey)) {
+            return $this->json->error('Too many registration attempts. Try again later.', 429);
         }
 
         $payload = json_decode($request->getContent(), true);
@@ -77,6 +85,12 @@ class AuthController
             return $this->json->ok(['ok' => true]);
         }
 
+        $ip = $this->extractClientIp($request);
+        $globalKey = sprintf('ip:%s', $ip);
+        if (!$this->throttle->isAllowed('login', $globalKey)) {
+            return $this->json->error('Too many login attempts. Try again later.', 429);
+        }
+
         $payload = json_decode($request->getContent(), true);
         if (!is_array($payload)) {
             return $this->json->error('Invalid JSON body.', 400);
@@ -85,6 +99,10 @@ class AuthController
         $userId = trim((string) ($payload['userId'] ?? ''));
         $secret = (string) ($payload['secret'] ?? '');
         $publicKey = trim((string) ($payload['publicKey'] ?? ''));
+        $userScopeKey = sprintf('ip:%s:user:%s', $ip, strtolower($userId));
+        if ($userId !== '' && !$this->throttle->isAllowed('login_user', $userScopeKey)) {
+            return $this->json->error('Too many login attempts. Try again later.', 429);
+        }
 
         if ($userId === '' || $secret === '') {
             return $this->json->error('userId and secret are required.', 422);
@@ -106,11 +124,26 @@ class AuthController
         }
 
         $token = $this->auth->issueToken($user);
+        $this->throttle->reset('login_user', $userScopeKey);
 
         return $this->json->ok([
             'userId' => $user->getId(),
             'token' => $token,
             'publicKey' => $user->getPublicKey(),
         ]);
+    }
+
+    private function extractClientIp(Request $request): string
+    {
+        $forwarded = trim((string) $request->headers->get('X-Forwarded-For', ''));
+        if ($forwarded !== '') {
+            $parts = array_map(static fn (string $item): string => trim($item), explode(',', $forwarded));
+            if (isset($parts[0]) && $parts[0] !== '') {
+                return $parts[0];
+            }
+        }
+
+        $ip = trim((string) $request->getClientIp());
+        return $ip !== '' ? $ip : 'unknown';
     }
 }
