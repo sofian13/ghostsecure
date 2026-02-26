@@ -12,4 +12,4 @@ COPY . /app
 
 RUN composer install --no-interaction
 
-CMD ["php", "-S", "0.0.0.0:8000", "-t", "public"]
+CMD ["sh", "-lc", "php bin/console doctrine:migrations:migrate --no-interaction && php -S 0.0.0.0:8000 -t public"]
