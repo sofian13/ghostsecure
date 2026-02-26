@@ -12,6 +12,7 @@ export default function SecurityShell({ userId, children }: Props) {
   const [hidden, setHidden] = useState(false);
   const [manualLock, setManualLock] = useState(false);
   const [captureAlert, setCaptureAlert] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<{ inviteId: string; fromUserId: string } | null>(null);
 
   useEffect(() => {
     const lock = () => setHidden(true);
@@ -139,6 +140,7 @@ export default function SecurityShell({ userId, children }: Props) {
     const notifyIncomingCall = (inviteId: string, fromUserId: string) => {
       if (!inviteId || inviteId === lastNotified.id) return;
       lastNotified.id = inviteId;
+      setIncomingCall({ inviteId, fromUserId });
 
       if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
         navigator.vibrate([200, 120, 200]);
@@ -258,6 +260,30 @@ export default function SecurityShell({ userId, children }: Props) {
         </div>
       )}
       {captureAlert && <div className="capture-alert">Capture detectee. Affichage masque.</div>}
+      {incomingCall && (
+        <div className="incoming-popup" role="alert" aria-live="assertive">
+          <div>
+            <strong>Appel entrant</strong>
+            <p>{incomingCall.fromUserId} vous appelle</p>
+          </div>
+          <div className="row">
+            <button
+              type="button"
+              className="ghost-primary"
+              onClick={() => {
+                const { fromUserId, inviteId } = incomingCall;
+                setIncomingCall(null);
+                window.location.href = `/call?target=${encodeURIComponent(fromUserId)}&autocall=0&autoaccept=1&invite=${encodeURIComponent(inviteId)}`;
+              }}
+            >
+              Repondre
+            </button>
+            <button type="button" className="ghost-secondary" onClick={() => setIncomingCall(null)}>
+              Ignorer
+            </button>
+          </div>
+        </div>
+      )}
       <button type="button" className="ghost-btn lock-toggle" onClick={() => setManualLock((v) => !v)}>
         {manualLock ? 'Unlock' : 'Lock'}
       </button>

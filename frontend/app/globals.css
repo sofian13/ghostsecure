@@ -815,6 +815,27 @@ select {
   font-size: 0.82rem;
 }
 
+.incoming-popup {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 56px;
+  z-index: 44;
+  width: min(420px, 92vw);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+  background: rgba(10, 18, 28, 0.94);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
+.incoming-popup p {
+  color: var(--muted);
+  margin-top: 3px;
+}
+
 @media (min-width: 960px) {
   .mobile-screen {
     max-width: 860px;
