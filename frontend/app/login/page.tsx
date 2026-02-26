@@ -12,6 +12,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<AuthMode>('login');
   const [userIdInput, setUserIdInput] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,6 +24,10 @@ export default function LoginPage() {
       setError('Identifiant invalide. Format: 3-24 caracteres [a-z0-9_-].');
       return;
     }
+    if (password.length < 6) {
+      setError('Mot de passe trop court (6 caracteres minimum).');
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -30,8 +35,8 @@ export default function LoginPage() {
       const keys = await ensureIdentity(userId);
       const session =
         mode === 'register'
-          ? await registerUser(keys.publicKey, userId)
-          : await loginUser(userId, keys.publicKey);
+          ? await registerUser(keys.publicKey, userId, password)
+          : await loginUser(userId, password, keys.publicKey);
 
       setSession(session);
       router.replace('/chat');
@@ -94,6 +99,18 @@ export default function LoginPage() {
               placeholder="ex: phantom_01"
               maxLength={24}
               autoFocus
+            />
+          </label>
+
+          <label className="field">
+            <span>Mot de passe</span>
+            <input
+              className="glass-input"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="6 caracteres minimum"
+              minLength={6}
             />
           </label>
 

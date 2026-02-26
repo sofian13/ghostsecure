@@ -45,12 +45,6 @@ function toFriendRequest(row: FriendRequestRow): FriendRequest {
   };
 }
 
-async function deriveSecret(userId: string, publicKey: string): Promise<string> {
-  const data = new TextEncoder().encode(`${userId}:${publicKey}`);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
 async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Session): Promise<T> {
   if (!API_BASE_URL) {
     throw new Error('Missing env NEXT_PUBLIC_API_BASE_URL');
@@ -81,28 +75,26 @@ async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Ses
   return parsed as T;
 }
 
-export async function registerUser(publicKey: string, userId: string): Promise<Session> {
+export async function registerUser(publicKey: string, userId: string, password: string): Promise<Session> {
   const normalized = normalizeUserId(userId);
-  const secret = await deriveSecret(normalized, publicKey);
   const data = await apiRequest<{ userId: string; token: string }>(
     '/api/auth/register',
     {
       method: 'POST',
-      body: JSON.stringify({ userId: normalized, publicKey, secret }),
+      body: JSON.stringify({ userId: normalized, publicKey, secret: password }),
     }
   );
   return toSession(data.userId, data.token);
 }
 
-export async function loginUser(userId: string, publicKey?: string): Promise<Session> {
+export async function loginUser(userId: string, password: string, publicKey?: string): Promise<Session> {
   const normalized = normalizeUserId(userId);
   const resolvedPublicKey = publicKey ?? '';
-  const secret = await deriveSecret(normalized, resolvedPublicKey);
   const data = await apiRequest<{ userId: string; token: string }>(
     '/api/auth/login',
     {
       method: 'POST',
-      body: JSON.stringify({ userId: normalized, publicKey: resolvedPublicKey, secret }),
+      body: JSON.stringify({ userId: normalized, publicKey: resolvedPublicKey, secret: password }),
     }
   );
   return toSession(data.userId, data.token);
@@ -244,4 +236,3 @@ export async function acceptFriendRequest(session: Session, requestId: string): 
 }
 
 export type { FriendRequest };
-
