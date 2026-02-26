@@ -66,6 +66,10 @@ function createDistortionCurve(amount: number): Float32Array {
 }
 
 const ICE_SERVERS = resolveIceServers();
+const LOW_BANDWIDTH_AUDIO_MAX_BITRATE = 18000;
+const ICE_PARTIAL_GATHERING_CALLER_MS = 2600;
+const ICE_PARTIAL_GATHERING_CALLEE_MS = 2200;
+const CONNECT_SLOW_NETWORK_TIMEOUT_MS = 45000;
 
 export default function CallPage() {
   const router = useRouter();
@@ -408,7 +412,18 @@ export default function CallPage() {
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require',
     });
-    outbound.getTracks().forEach((track) => pc.addTrack(track, outbound));
+    const senders = outbound.getTracks().map((track) => pc.addTrack(track, outbound));
+    for (const sender of senders) {
+      if (sender.track?.kind !== 'audio') continue;
+      try {
+        const params = sender.getParameters();
+        const encodings = params.encodings?.length ? [...params.encodings] : [{}];
+        encodings[0] = { ...encodings[0], maxBitrate: LOW_BANDWIDTH_AUDIO_MAX_BITRATE };
+        await sender.setParameters({ ...params, encodings });
+      } catch {
+        // Some browsers can reject setParameters early; call setup remains functional without it.
+      }
+    }
 
     pc.ontrack = (event) => {
       const [stream] = event.streams;
@@ -498,7 +513,7 @@ export default function CallPage() {
     const pc = await ensurePeer(target, callId);
     const offer = await pc.createOffer({ offerToReceiveAudio: true });
     await pc.setLocalDescription(offer);
-    await waitIceGatheringPartial(pc, 1200);
+    await waitIceGatheringPartial(pc, ICE_PARTIAL_GATHERING_CALLER_MS);
 
     const supabase = getSupabaseClient();
     const { error } = await supabase.from('call_invite').insert({
@@ -521,7 +536,7 @@ export default function CallPage() {
     connectTimeoutRef.current = window.setTimeout(() => {
       const state = pcRef.current?.connectionState;
       if (state !== 'connected') setStatusText('Connexion lente. Reessayez ou ajoutez TURN dedie.');
-    }, 22000);
+    }, CONNECT_SLOW_NETWORK_TIMEOUT_MS);
     startAnswerPolling(inviteId);
     void finalizeOfferSdp(inviteId);
     await loadHistory(me);
@@ -538,7 +553,7 @@ export default function CallPage() {
     await pc.setRemoteDescription(incoming.sdp);
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    await waitIceGatheringPartial(pc, 900);
+    await waitIceGatheringPartial(pc, ICE_PARTIAL_GATHERING_CALLEE_MS);
 
     const supabase = getSupabaseClient();
     const { error } = await supabase
