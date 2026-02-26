@@ -115,6 +115,7 @@ export default function CallPage() {
   const connectTimeoutRef = useRef<number | null>(null);
   const setupTimeoutRef = useRef<number | null>(null);
   const callStartingRef = useRef(false);
+  const acceptingRef = useRef(false);
   const autoCalledRef = useRef(false);
   const autoAcceptedRef = useRef(false);
 
@@ -591,37 +592,58 @@ export default function CallPage() {
   };
 
   const acceptIncoming = async () => {
+    if (acceptingRef.current) return;
     const incoming = incomingOffer;
     if (!incoming) return;
-    lastIncomingInviteRef.current = incoming.inviteId;
-    setIncomingOffer(null);
-    setStatusText(`Reponse automatique a ${incoming.fromUserId}...`);
+    acceptingRef.current = true;
+    try {
+      lastIncomingInviteRef.current = incoming.inviteId;
+      setIncomingOffer(null);
+      setStatusText(`Reponse a ${incoming.fromUserId}...`);
 
-    const pc = await ensurePeer(incoming.fromUserId, incoming.callId);
-    await pc.setRemoteDescription(incoming.sdp);
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    await waitIceGatheringPartial(pc, ICE_PARTIAL_GATHERING_CALLEE_MS);
+      const pc = await ensurePeer(incoming.fromUserId, incoming.callId);
+      await pc.setRemoteDescription(incoming.sdp);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await waitIceGatheringPartial(pc, ICE_PARTIAL_GATHERING_CALLEE_MS);
 
-    const supabase = getSupabaseClient();
-    const { error } = await supabase
-      .from('call_invite')
-      .update({
-        status: 'accepted',
-        answer_sdp: pc.localDescription ?? answer,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', incoming.inviteId);
-    if (error) {
-      setStatusText(`Erreur reponse: ${error.message}`);
-      return;
+      const supabase = getSupabaseClient();
+      const { error } = await supabase
+        .from('call_invite')
+        .update({
+          status: 'accepted',
+          answer_sdp: pc.localDescription ?? answer,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', incoming.inviteId);
+      if (error) {
+        setStatusText(`Erreur reponse: ${error.message}`);
+        teardownPeer();
+        return;
+      }
+
+      const me = normalizeUserId(userId);
+      if (me) {
+        await supabase
+          .from('call_invite')
+          .update({ status: 'rejected', updated_at: new Date().toISOString() })
+          .eq('target_user_id', me)
+          .eq('from_user_id', incoming.fromUserId)
+          .eq('status', 'pending')
+          .neq('id', incoming.inviteId);
+      }
+
+      activeInviteIdRef.current = incoming.inviteId;
+      lastIncomingInviteRef.current = incoming.inviteId;
+      setStatusText(`Connexion avec ${incoming.fromUserId}...`);
+      void finalizeAnswerSdp(incoming.inviteId);
+      if (userId) await loadHistory(userId);
+    } catch {
+      setStatusText('Echec de reponse. Reessayez.');
+      teardownPeer();
+    } finally {
+      acceptingRef.current = false;
     }
-
-    activeInviteIdRef.current = incoming.inviteId;
-    lastIncomingInviteRef.current = incoming.inviteId;
-    setStatusText(`Connexion avec ${incoming.fromUserId}...`);
-    void finalizeAnswerSdp(incoming.inviteId);
-    if (userId) await loadHistory(userId);
   };
 
   const rejectIncoming = async () => {
@@ -692,6 +714,7 @@ export default function CallPage() {
   function applyIncomingOffer(row: InviteRow) {
     const from = normalizeUserId(row.from_user_id);
     if (!from || row.status !== 'pending') return;
+    if (acceptingRef.current) return;
     const cooldownUntil = rejectCooldownRef.current[from] ?? 0;
     if (Date.now() < cooldownUntil) return;
     if (row.id === lastIncomingInviteRef.current) return;
