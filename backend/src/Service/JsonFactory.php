@@ -15,10 +15,14 @@ class JsonFactory
             'Access-Control-Allow-Origin' => $allowedOrigin,
             'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
             'Access-Control-Allow-Methods' => 'GET,POST,OPTIONS',
+            'Access-Control-Allow-Credentials' => 'false',
             'Vary' => 'Origin',
             'X-Content-Type-Options' => 'nosniff',
             'X-Frame-Options' => 'DENY',
             'Referrer-Policy' => 'no-referrer',
+            'Strict-Transport-Security' => 'max-age=31536000; includeSubDomains; preload',
+            'X-Permitted-Cross-Domain-Policies' => 'none',
+            'Cross-Origin-Resource-Policy' => 'same-site',
             'Permissions-Policy' => 'geolocation=(), camera=(), microphone=()',
             'Cache-Control' => 'no-store, max-age=0',
             'Pragma' => 'no-cache',
@@ -35,10 +39,14 @@ class JsonFactory
         $raw = getenv('APP_ALLOWED_ORIGINS') ?: 'http://localhost:3000';
         $allowed = array_values(array_filter(array_map(static fn (string $item): string => trim($item), explode(',', $raw))));
 
+        if ($origin === '') {
+            return $allowed[0] ?? 'http://localhost:3000';
+        }
+
         if ($origin !== '' && in_array($origin, $allowed, true)) {
             return $origin;
         }
 
-        return $allowed[0] ?? 'http://localhost:3000';
+        return 'null';
     }
 }

@@ -48,6 +48,13 @@ class WsServerCommand extends Command implements MessageComponentInterface
     {
         $this->wsLog(sprintf('OPEN id=%s', (string) $conn->resourceId));
 
+        $origin = $this->readOrigin($conn);
+        if (!$this->isAllowedOrigin($origin)) {
+            $this->wsLog(sprintf('CLOSE id=%s reason=origin_not_allowed origin=%s', (string) $conn->resourceId, $origin !== '' ? $origin : '<empty>'));
+            $conn->close();
+            return;
+        }
+
         $query = [];
         parse_str($conn->httpRequest->getUri()->getQuery(), $query);
         $token = (string) ($query['token'] ?? '');
@@ -114,6 +121,31 @@ class WsServerCommand extends Command implements MessageComponentInterface
     private function wsLog(string $message): void
     {
         fwrite(STDOUT, sprintf("[WS] %s\n", $message));
+    }
+
+    private function readOrigin(ConnectionInterface $conn): string
+    {
+        $headers = $conn->httpRequest->getHeader('Origin');
+        if (!is_array($headers) || count($headers) === 0) {
+            return '';
+        }
+
+        return trim((string) $headers[0]);
+    }
+
+    private function isAllowedOrigin(string $origin): bool
+    {
+        if ($origin === '') {
+            $appEnv = strtolower((string) (getenv('APP_ENV') ?: 'dev'));
+            $allowEmpty = (string) (getenv('APP_WS_ALLOW_EMPTY_ORIGIN') ?: '0');
+
+            return $appEnv !== 'prod' || $allowEmpty === '1';
+        }
+
+        $raw = (string) (getenv('APP_ALLOWED_ORIGINS') ?: '');
+        $allowed = array_values(array_filter(array_map(static fn (string $item): string => trim($item), explode(',', $raw))));
+
+        return in_array($origin, $allowed, true);
     }
 
     private function pollMessages(): void

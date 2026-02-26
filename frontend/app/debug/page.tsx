@@ -1,4 +1,10 @@
+import { notFound } from 'next/navigation';
+
 export default function Debug() {
+  if (process.env.NODE_ENV === 'production') {
+    notFound();
+  }
+
   return (
     <pre>
       {JSON.stringify(
