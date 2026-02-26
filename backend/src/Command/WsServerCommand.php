@@ -46,11 +46,14 @@ class WsServerCommand extends Command implements MessageComponentInterface
 
     public function onOpen(ConnectionInterface $conn): void
     {
+        $this->wsLog(sprintf('OPEN id=%s', (string) $conn->resourceId));
+
         $query = [];
         parse_str($conn->httpRequest->getUri()->getQuery(), $query);
         $token = (string) ($query['token'] ?? '');
 
         if ($token === '') {
+            $this->wsLog(sprintf('CLOSE id=%s reason=missing_token', (string) $conn->resourceId));
             $conn->close();
             return;
         }
@@ -65,6 +68,7 @@ class WsServerCommand extends Command implements MessageComponentInterface
         );
 
         if (!$row || !isset($row['user_id'])) {
+            $this->wsLog(sprintf('CLOSE id=%s reason=invalid_or_expired_token', (string) $conn->resourceId));
             $conn->close();
             return;
         }
@@ -95,14 +99,21 @@ class WsServerCommand extends Command implements MessageComponentInterface
 
     public function onClose(ConnectionInterface $conn): void
     {
+        $this->wsLog(sprintf('CLOSE id=%s', (string) $conn->resourceId));
         $this->clients->detach($conn);
         unset($this->meta[$conn->resourceId]);
     }
 
     public function onError(ConnectionInterface $conn, \Exception $e): void
     {
+        $this->wsLog(sprintf('ERROR id=%s message=%s', (string) $conn->resourceId, $e->getMessage()));
         $conn->close();
         $this->onClose($conn);
+    }
+
+    private function wsLog(string $message): void
+    {
+        fwrite(STDOUT, sprintf("[WS] %s\n", $message));
     }
 
     private function pollMessages(): void
