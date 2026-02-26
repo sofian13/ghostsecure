@@ -343,7 +343,7 @@ function normalizeError(err: unknown, fallback: string): string {
   const message = err.message.toLowerCase();
   if (message.includes('forbidden')) return 'Action non autorisee.';
   if (message.includes('invalid') || message.includes('introuvable')) return err.message;
-  if (message.includes('failed to fetch')) return 'Supabase indisponible. Verifiez les variables env.';
+  if (message.includes('failed to fetch')) return 'Connexion backend indisponible. Verifiez API, reseau et serveur.';
   return fallback;
 }
 
