@@ -16,7 +16,8 @@
     "symfony/http-client": "7.1.*",
     "symfony/runtime": "7.1.*",
     "symfony/yaml": "7.1.*",
-    "cboden/ratchet": "^0.4"
+    "cboden/ratchet": "^0.4",
+    "symfony/var-exporter": "^7.2.5"
   },
   "require-dev": {
     "symfony/maker-bundle": "^1.60",
@@ -54,6 +55,9 @@
     "allow-plugins": {
       "symfony/flex": true,
       "symfony/runtime": true
+    },
+    "audit": {
+      "block-insecure": true
     }
   }
 }
