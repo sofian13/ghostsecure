@@ -114,7 +114,13 @@ class AuthController
         }
 
         $hash = $user->getSecretHash();
-        if (!is_string($hash) || $hash === '' || !password_verify($secret, $hash)) {
+        if (!is_string($hash) || $hash === '') {
+            if ($publicKey === '' || !hash_equals($user->getPublicKey(), $publicKey)) {
+                return $this->json->error('Invalid credentials.', 401);
+            }
+            $user->setSecretHash(password_hash($secret, PASSWORD_DEFAULT));
+            $this->em->flush();
+        } elseif (!password_verify($secret, $hash)) {
             return $this->json->error('Invalid credentials.', 401);
         }
 

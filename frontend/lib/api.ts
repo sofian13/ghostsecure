@@ -1,20 +1,7 @@
 import { getSupabaseClient } from '@/lib/supabase';
-import type { Conversation, ConversationDetail, EncryptedMessage, Session, UserProfile } from '@/types';
+import type { Conversation, ConversationDetail, EncryptedMessage, Session } from '@/types';
 
-type UserRow = { id: string; public_key: string };
-type ConversationMemberRow = { conversation_id: string; user_id: string };
-type MessageRow = {
-  id: string;
-  conversation_id: string;
-  sender_id: string;
-  ciphertext: string;
-  iv: string;
-  wrapped_keys: Record<string, string>;
-  created_at: string;
-  expires_at: string | null;
-};
-
-export type FriendRequest = {
+type FriendRequest = {
   id: string;
   requesterId: string;
   targetUserId: string;
@@ -30,19 +17,21 @@ type FriendRequestRow = {
   created_at: string;
 };
 
+type ApiError = { error?: string };
+
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? '').replace(/\/+$/, '');
+
 function normalizeUserId(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function toMessage(row: MessageRow): EncryptedMessage {
+function toSession(userId: string, token: string): Session {
+  const now = new Date();
   return {
-    id: row.id,
-    senderId: row.sender_id,
-    ciphertext: row.ciphertext,
-    iv: row.iv,
-    wrappedKeys: row.wrapped_keys ?? {},
-    createdAt: row.created_at,
-    expiresAt: row.expires_at,
+    userId,
+    token,
+    issuedAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString(),
   };
 }
 
@@ -56,107 +45,120 @@ function toFriendRequest(row: FriendRequestRow): FriendRequest {
   };
 }
 
-function toSession(userId: string): Session {
-  const now = new Date().toISOString();
-  return {
-    userId,
-    token: userId,
-    issuedAt: now,
-    expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
-  };
+async function deriveSecret(userId: string, publicKey: string): Promise<string> {
+  const data = new TextEncoder().encode(`${userId}:${publicKey}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function requireMembership(userId: string, conversationId: string): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('conversation_member')
-    .select('conversation_id')
-    .eq('conversation_id', conversationId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error) throw new Error(`Access check failed: ${error.message}`);
-  if (!data) throw new Error('Forbidden');
-}
-
-async function findOrCreateConversation(me: string, peerUserId: string, peerPublicKey: string): Promise<Conversation> {
-  const supabase = getSupabaseClient();
-  const { data: existingRows, error: existingError } = await supabase
-    .from('conversation_member')
-    .select('conversation_id,user_id')
-    .in('user_id', [me, peerUserId]);
-  if (existingError) throw new Error(`Create conversation failed: ${existingError.message}`);
-
-  const participantsByConversation = new Map<string, Set<string>>();
-  for (const row of (existingRows ?? []) as ConversationMemberRow[]) {
-    if (!participantsByConversation.has(row.conversation_id)) {
-      participantsByConversation.set(row.conversation_id, new Set());
-    }
-    participantsByConversation.get(row.conversation_id)?.add(row.user_id);
+async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Session): Promise<T> {
+  if (!API_BASE_URL) {
+    throw new Error('Missing env NEXT_PUBLIC_API_BASE_URL');
   }
 
-  for (const [conversationId, participants] of participantsByConversation.entries()) {
-    if (participants.has(me) && participants.has(peerUserId)) {
-      return {
-        id: conversationId,
-        peerId: peerUserId,
-        peerPublicKey,
-        updatedAt: new Date().toISOString(),
-      };
-    }
+  const headers = new Headers(init.headers ?? {});
+  headers.set('Accept', 'application/json');
+  if (init.body) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (session?.token) {
+    headers.set('Authorization', `Bearer ${session.token}`);
   }
 
-  const conversationId = crypto.randomUUID();
-  const now = new Date().toISOString();
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
 
-  const { error: convError } = await supabase.from('conversation').insert({ id: conversationId, created_at: now });
-  if (convError) throw new Error(`Create conversation failed: ${convError.message}`);
+  const text = await response.text();
+  const parsed = text ? (JSON.parse(text) as T | ApiError) : ({} as T);
 
-  const { error: membersError } = await supabase.from('conversation_member').insert([
-    { conversation_id: conversationId, user_id: me },
-    { conversation_id: conversationId, user_id: peerUserId },
-  ]);
-  if (membersError) throw new Error(`Create conversation failed: ${membersError.message}`);
+  if (!response.ok) {
+    const message = (parsed as ApiError)?.error ?? `Request failed (${response.status})`;
+    throw new Error(message);
+  }
 
-  return {
-    id: conversationId,
-    peerId: peerUserId,
-    peerPublicKey,
-    updatedAt: now,
-  };
+  return parsed as T;
 }
 
 export async function registerUser(publicKey: string, userId: string): Promise<Session> {
-  const supabase = getSupabaseClient();
-  const now = new Date().toISOString();
   const normalized = normalizeUserId(userId);
-
-  const { error } = await supabase.from('app_user').upsert(
+  const secret = await deriveSecret(normalized, publicKey);
+  const data = await apiRequest<{ userId: string; token: string }>(
+    '/api/auth/register',
     {
-      id: normalized,
-      public_key: publicKey,
-      created_at: now,
-    },
-    { onConflict: 'id' }
+      method: 'POST',
+      body: JSON.stringify({ userId: normalized, publicKey, secret }),
+    }
   );
-  if (error) throw new Error(`Register failed: ${error.message}`);
-
-  return toSession(normalized);
+  return toSession(data.userId, data.token);
 }
 
 export async function loginUser(userId: string, publicKey?: string): Promise<Session> {
-  const supabase = getSupabaseClient();
   const normalized = normalizeUserId(userId);
-  const { data, error } = await supabase.from('app_user').select('id').eq('id', normalized).maybeSingle();
-  if (error) throw new Error(`Login failed: ${error.message}`);
-  if (!data) throw new Error('Invalid credentials');
-  if (publicKey) {
-    const { error: updateError } = await supabase.from('app_user').update({ public_key: publicKey }).eq('id', normalized);
-    if (updateError) throw new Error(`Login failed: ${updateError.message}`);
-  }
-  return toSession(normalized);
+  const resolvedPublicKey = publicKey ?? '';
+  const secret = await deriveSecret(normalized, resolvedPublicKey);
+  const data = await apiRequest<{ userId: string; token: string }>(
+    '/api/auth/login',
+    {
+      method: 'POST',
+      body: JSON.stringify({ userId: normalized, publicKey: resolvedPublicKey, secret }),
+    }
+  );
+  return toSession(data.userId, data.token);
 }
 
+export async function fetchConversations(session: Session): Promise<Conversation[]> {
+  return apiRequest<Conversation[]>('/api/conversations', { method: 'GET' }, session);
+}
+
+export async function createConversation(session: Session, peerUserId: string): Promise<Conversation> {
+  return apiRequest<Conversation>(
+    '/api/conversations',
+    {
+      method: 'POST',
+      body: JSON.stringify({ peerUserId: normalizeUserId(peerUserId) }),
+    },
+    session
+  );
+}
+
+export async function fetchConversationDetail(session: Session, conversationId: string): Promise<ConversationDetail> {
+  return apiRequest<ConversationDetail>(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: 'GET' }, session);
+}
+
+export async function fetchMessages(session: Session, conversationId: string): Promise<EncryptedMessage[]> {
+  const rows = await apiRequest<EncryptedMessage[]>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+    { method: 'GET' },
+    session
+  );
+
+  const now = Date.now();
+  return rows.filter((m) => !m.expiresAt || Date.parse(m.expiresAt) > now);
+}
+
+export async function sendMessage(
+  session: Session,
+  conversationId: string,
+  payload: {
+    ciphertext: string;
+    iv: string;
+    wrappedKeys: Record<string, string>;
+    expiresInSeconds?: number;
+  }
+): Promise<EncryptedMessage> {
+  return apiRequest<EncryptedMessage>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    session
+  );
+}
+
+// Keeping friend/call flows on Supabase for now to avoid breaking existing realtime features.
 export async function sendFriendRequest(session: Session, targetUserId: string): Promise<void> {
   const supabase = getSupabaseClient();
   const me = normalizeUserId(session.userId);
@@ -238,170 +240,8 @@ export async function acceptFriendRequest(session: Session, requestId: string): 
   const { error: updateError } = await supabase.from('friend_request').update({ status: 'accepted' }).eq('id', request.id);
   if (updateError) throw new Error(`Accept request failed: ${updateError.message}`);
 
-  return findOrCreateConversation(me, request.requester_id, (peer as UserRow).public_key);
+  return createConversation(session, request.requester_id);
 }
 
-export async function fetchConversations(session: Session): Promise<Conversation[]> {
-  const supabase = getSupabaseClient();
-  const me = session.userId;
+export type { FriendRequest };
 
-  const { data: mine, error: mineError } = await supabase
-    .from('conversation_member')
-    .select('conversation_id,user_id')
-    .eq('user_id', me);
-  if (mineError) throw new Error(`Conversations failed: ${mineError.message}`);
-  if (!mine || mine.length === 0) return [];
-
-  const conversationIds = [...new Set(mine.map((r) => r.conversation_id))];
-  const { data: allMembers, error: membersError } = await supabase
-    .from('conversation_member')
-    .select('conversation_id,user_id')
-    .in('conversation_id', conversationIds);
-  if (membersError) throw new Error(`Conversations failed: ${membersError.message}`);
-
-  const peerByConversation = new Map<string, string>();
-  for (const row of (allMembers ?? []) as ConversationMemberRow[]) {
-    if (row.user_id !== me && !peerByConversation.has(row.conversation_id)) {
-      peerByConversation.set(row.conversation_id, row.user_id);
-    }
-  }
-
-  const peerIds = [...new Set([...peerByConversation.values()])];
-  const peerMap = new Map<string, UserRow>();
-  if (peerIds.length > 0) {
-    const { data: peers, error: peersError } = await supabase
-      .from('app_user')
-      .select('id,public_key')
-      .in('id', peerIds);
-    if (peersError) throw new Error(`Conversations failed: ${peersError.message}`);
-    for (const peer of (peers ?? []) as UserRow[]) peerMap.set(peer.id, peer);
-  }
-
-  const { data: messageRows, error: msgError } = await supabase
-    .from('message')
-    .select('conversation_id,created_at')
-    .in('conversation_id', conversationIds)
-    .order('created_at', { ascending: false });
-  if (msgError) throw new Error(`Conversations failed: ${msgError.message}`);
-
-  const updatedByConversation = new Map<string, string>();
-  for (const row of messageRows ?? []) {
-    if (!updatedByConversation.has(row.conversation_id)) {
-      updatedByConversation.set(row.conversation_id, row.created_at);
-    }
-  }
-
-  const rows: Conversation[] = [];
-  for (const conversationId of conversationIds) {
-    const peerId = peerByConversation.get(conversationId);
-    if (!peerId) continue;
-    const peer = peerMap.get(peerId);
-    if (!peer) continue;
-    rows.push({
-      id: conversationId,
-      peerId,
-      peerPublicKey: peer.public_key,
-      updatedAt: updatedByConversation.get(conversationId) ?? new Date().toISOString(),
-    });
-  }
-
-  rows.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  return rows;
-}
-
-export async function createConversation(session: Session, peerUserId: string): Promise<Conversation> {
-  const supabase = getSupabaseClient();
-  const me = session.userId;
-  if (me === peerUserId) throw new Error('Peer not found');
-
-  const { data: peer, error: peerError } = await supabase
-    .from('app_user')
-    .select('id,public_key')
-    .eq('id', normalizeUserId(peerUserId))
-    .maybeSingle();
-  if (peerError) throw new Error(`Create conversation failed: ${peerError.message}`);
-  if (!peer) throw new Error('Peer not found');
-
-  return findOrCreateConversation(me, (peer as UserRow).id, (peer as UserRow).public_key);
-}
-
-export async function fetchConversationDetail(session: Session, conversationId: string): Promise<ConversationDetail> {
-  const supabase = getSupabaseClient();
-  await requireMembership(session.userId, conversationId);
-
-  const { data: members, error: membersError } = await supabase
-    .from('conversation_member')
-    .select('user_id')
-    .eq('conversation_id', conversationId);
-  if (membersError) throw new Error(`Conversation detail failed: ${membersError.message}`);
-
-  const userIds = [...new Set((members ?? []).map((row) => row.user_id))];
-  if (userIds.length === 0) return { id: conversationId, participants: [] };
-
-  const { data: users, error: usersError } = await supabase
-    .from('app_user')
-    .select('id,public_key')
-    .in('id', userIds);
-  if (usersError) throw new Error(`Conversation detail failed: ${usersError.message}`);
-
-  const participants: UserProfile[] = ((users ?? []) as UserRow[]).map((u) => ({
-    id: u.id,
-    publicKey: u.public_key,
-  }));
-
-  return { id: conversationId, participants };
-}
-
-export async function fetchMessages(session: Session, conversationId: string): Promise<EncryptedMessage[]> {
-  const supabase = getSupabaseClient();
-  await requireMembership(session.userId, conversationId);
-
-  const { data, error } = await supabase
-    .from('message')
-    .select('id,conversation_id,sender_id,ciphertext,iv,wrapped_keys,created_at,expires_at')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true });
-  if (error) throw new Error(`Messages failed: ${error.message}`);
-
-  const now = Date.now();
-  return ((data ?? []) as MessageRow[])
-    .map(toMessage)
-    .filter((m) => !m.expiresAt || Date.parse(m.expiresAt) > now);
-}
-
-export async function sendMessage(
-  session: Session,
-  conversationId: string,
-  payload: {
-    ciphertext: string;
-    iv: string;
-    wrappedKeys: Record<string, string>;
-    expiresInSeconds?: number;
-  }
-): Promise<EncryptedMessage> {
-  const supabase = getSupabaseClient();
-  await requireMembership(session.userId, conversationId);
-
-  const ttl = Math.max(0, Math.min(payload.expiresInSeconds ?? 0, 86400));
-  const now = new Date();
-  const expiresAt = ttl > 0 ? new Date(now.getTime() + ttl * 1000).toISOString() : null;
-  const row: MessageRow = {
-    id: crypto.randomUUID(),
-    conversation_id: conversationId,
-    sender_id: session.userId,
-    ciphertext: payload.ciphertext,
-    iv: payload.iv,
-    wrapped_keys: payload.wrappedKeys,
-    created_at: now.toISOString(),
-    expires_at: expiresAt,
-  };
-
-  const { data, error } = await supabase
-    .from('message')
-    .insert(row)
-    .select('id,conversation_id,sender_id,ciphertext,iv,wrapped_keys,created_at,expires_at')
-    .single();
-  if (error) throw new Error(`Send failed: ${error.message}`);
-
-  return toMessage(data as MessageRow);
-}
