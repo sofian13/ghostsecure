@@ -21,6 +21,32 @@ type ApiError = { error?: string };
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? '').replace(/\/+$/, '');
 
+function resolveApiBaseUrl(): string {
+  if (API_BASE_URL) {
+    if (typeof window !== 'undefined') {
+      try {
+        const url = new URL(API_BASE_URL);
+        const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+        const browserHost = window.location.hostname;
+        const browserIsLocal = browserHost === 'localhost' || browserHost === '127.0.0.1';
+        if (isLocal && !browserIsLocal) {
+          url.hostname = browserHost;
+          return url.toString().replace(/\/+$/, '');
+        }
+      } catch {
+        return API_BASE_URL;
+      }
+    }
+    return API_BASE_URL;
+  }
+
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+
+  throw new Error('Missing env NEXT_PUBLIC_API_BASE_URL');
+}
+
 function normalizeUserId(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -46,9 +72,7 @@ function toFriendRequest(row: FriendRequestRow): FriendRequest {
 }
 
 async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Session): Promise<T> {
-  if (!API_BASE_URL) {
-    throw new Error('Missing env NEXT_PUBLIC_API_BASE_URL');
-  }
+  const baseUrl = resolveApiBaseUrl();
 
   const headers = new Headers(init.headers ?? {});
   headers.set('Accept', 'application/json');
@@ -59,7 +83,7 @@ async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Ses
     headers.set('Authorization', `Bearer ${session.token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers,
   });
