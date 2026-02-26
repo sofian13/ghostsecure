@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
 import MobileTabs from '@/components/MobileTabs';
@@ -16,6 +16,7 @@ import type { EncryptedMessage, Session } from '@/types';
 export default function ConversationPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const conversationId = decodeURIComponent(params.id);
 
   const [session, setSessionState] = useState<Session | null>(null);
@@ -25,6 +26,7 @@ export default function ConversationPage() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('En ligne');
   const [incomingCallFrom, setIncomingCallFrom] = useState<string | null>(null);
+  const [showRecallPrompt, setShowRecallPrompt] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
   const [draftVoiceUrl, setDraftVoiceUrl] = useState<string | null>(null);
@@ -67,6 +69,10 @@ export default function ConversationPage() {
       setError(normalizeError(e, 'Erreur chargement conversation'));
     });
   }, [session, conversationId]);
+
+  useEffect(() => {
+    setShowRecallPrompt(searchParams.get('autocall') === '1');
+  }, [searchParams]);
 
   useEffect(() => {
     if (!session) return;
@@ -356,6 +362,27 @@ export default function ConversationPage() {
             >
               Repondre
             </button>
+          </div>
+        )}
+
+        {showRecallPrompt && peerId && (
+          <div className="incoming-banner">
+            <p>Rappeler {peerId} ?</p>
+            <div className="row">
+              <button
+                type="button"
+                className="ghost-primary"
+                onClick={() => {
+                  setShowRecallPrompt(false);
+                  router.push(`/call?target=${encodeURIComponent(peerId)}&autocall=1`);
+                }}
+              >
+                Rappeler maintenant
+              </button>
+              <button type="button" className="ghost-secondary" onClick={() => setShowRecallPrompt(false)}>
+                Plus tard
+              </button>
+            </div>
           </div>
         )}
 

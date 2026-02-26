@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
+import { createConversation } from '@/lib/api';
 import { getSession } from '@/lib/session';
 import { getSupabaseClient } from '@/lib/supabase';
 
@@ -78,6 +79,7 @@ export default function CallPage() {
   const [statusText, setStatusText] = useState('Pret');
   const [incomingOffer, setIncomingOffer] = useState<IncomingOffer | null>(null);
   const [history, setHistory] = useState<InviteRow[]>([]);
+  const hasTarget = targetId.trim() !== '';
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -123,6 +125,11 @@ export default function CallPage() {
 
   useEffect(() => {
     if (!userId) return;
+    void loadHistory(userId);
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId || !hasTarget) return;
     const supabase = getSupabaseClient();
     const inviteChannel = supabase
       .channel(`call-invite:${userId}`)
@@ -135,7 +142,6 @@ export default function CallPage() {
       .subscribe();
 
     void hydratePendingInvite(userId);
-    void loadHistory(userId);
     startIncomingPolling(userId);
     setStatusText('Signalisation prete');
 
@@ -143,15 +149,14 @@ export default function CallPage() {
       void supabase.removeChannel(inviteChannel);
       if (incomingPollRef.current) window.clearInterval(incomingPollRef.current);
       incomingPollRef.current = null;
-      teardownPeer();
     };
-  }, [userId]);
+  }, [userId, hasTarget]);
 
   useEffect(() => {
-    if (!autoCall || autoCalledRef.current || !targetId) return;
+    if (!hasTarget || !autoCall || autoCalledRef.current || !targetId) return;
     autoCalledRef.current = true;
     void startCall();
-  }, [autoCall, targetId]);
+  }, [autoCall, targetId, hasTarget]);
 
   useEffect(() => {
     if (!autoAccept || autoAcceptedRef.current || !incomingOffer) return;
@@ -540,6 +545,16 @@ export default function CallPage() {
 
   if (!userId) return <main className="centered">Loading...</main>;
 
+  const recallFromHistory = async (peer: string) => {
+    const session = getSession();
+    if (!session) {
+      router.replace('/login');
+      return;
+    }
+    const conversation = await createConversation(session, normalizeUserId(peer));
+    router.push(`/chat/${encodeURIComponent(conversation.id)}?autocall=1`);
+  };
+
   function applyIncomingOffer(row: InviteRow) {
     const from = normalizeUserId(row.from_user_id);
     if (!from || row.status !== 'pending') return;
@@ -642,13 +657,11 @@ export default function CallPage() {
         <header className="mobile-header">
           <div>
             <h1>Appels</h1>
-            <p className="muted-text">Historique securise</p>
+            <p className="muted-text">{hasTarget ? 'Appel en cours' : 'Historique securise'}</p>
           </div>
-          <button type="button" className="ghost-primary" onClick={startCall}>
-            Nouvel appel
-          </button>
         </header>
 
+        {hasTarget && (
         <section className="inline-card">
           <label className="field">
             <span>Utilisateur a appeler</span>
@@ -679,8 +692,9 @@ export default function CallPage() {
           <p className={connected ? 'ok-text' : 'muted-text'}>{connected ? 'Canal audio actif' : statusText}</p>
           <audio ref={remoteAudioRef} autoPlay playsInline />
         </section>
+        )}
 
-        {incomingOffer && (
+        {hasTarget && incomingOffer && (
           <section className="incoming-banner">
             <p>{incomingOffer.fromUserId} appelle</p>
             <div className="row">
@@ -692,12 +706,7 @@ export default function CallPage() {
 
         <section className="call-list">
           {historyRows.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              className="call-row"
-              onClick={() => setTargetId(normalizeUserId(item.peer))}
-            >
+            <div key={item.id} className="call-row">
               <div className="chat-avatar small" aria-hidden="true">{item.peer.slice(0, 1).toUpperCase()}</div>
               <div className="chat-content">
                 <div className="chat-topline">
@@ -706,7 +715,10 @@ export default function CallPage() {
                 </div>
                 <p className="muted-text">{item.incoming ? 'Entrant' : 'Sortant'} - {item.state}</p>
               </div>
-            </button>
+              <button type="button" className="ghost-primary" onClick={() => void recallFromHistory(item.peer)}>
+                Rappeler
+              </button>
+            </div>
           ))}
         </section>
 

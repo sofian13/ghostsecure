@@ -1,6 +1,8 @@
 "use client";
 
+import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 
 type TabItem = {
   key: 'chats' | 'calls' | 'settings';
@@ -46,21 +48,27 @@ export default function MobileTabs() {
   const pathname = usePathname();
   const router = useRouter();
 
+  useEffect(() => {
+    for (const item of tabs) {
+      router.prefetch(item.href);
+    }
+  }, [router]);
+
   return (
     <nav className="mobile-tabs" aria-label="Navigation principale">
       {tabs.map((item) => {
         const active = isActive(pathname, item);
         return (
-          <button
+          <Link
             key={item.key}
-            type="button"
+            href={item.href}
+            prefetch
             className={`mobile-tab ${active ? 'active' : ''}`}
-            onClick={() => router.push(item.href)}
             aria-current={active ? 'page' : undefined}
           >
             <TabIcon kind={item.icon} />
             <span>{item.label}</span>
-          </button>
+          </Link>
         );
       })}
     </nav>
