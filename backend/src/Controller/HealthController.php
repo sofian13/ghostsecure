@@ -11,6 +11,7 @@ class HealthController
     {
     }
 
+    #[Route('/', name: 'api_root', methods: ['GET'])]
     #[Route('/api/health', name: 'api_health', methods: ['GET'])]
     public function __invoke()
     {
