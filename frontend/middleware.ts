@@ -1,6 +1,55 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
+function isLocalHost(value: string): boolean {
+  return value === 'localhost' || value === '127.0.0.1';
+}
+
+function resolveApiConnectTargets(request: NextRequest, apiBase: string): string[] {
+  const targets = new Set<string>();
+  const browserHost = request.nextUrl.hostname;
+
+  if (apiBase) {
+    targets.add(apiBase);
+    try {
+      const parsed = new URL(apiBase);
+      if (isLocalHost(parsed.hostname) && !isLocalHost(browserHost)) {
+        parsed.hostname = browserHost;
+        targets.add(parsed.toString().replace(/\/+$/, ''));
+      }
+    } catch {
+      // Keep raw env value only when parsing fails.
+    }
+    return Array.from(targets);
+  }
+
+  targets.add(`${request.nextUrl.protocol}//${browserHost}:8000`);
+  return Array.from(targets);
+}
+
+function resolveWsConnectTargets(request: NextRequest, wsBase: string): string[] {
+  const targets = new Set<string>();
+  const browserHost = request.nextUrl.hostname;
+
+  if (wsBase) {
+    targets.add(wsBase);
+    try {
+      const parsed = new URL(wsBase);
+      if (isLocalHost(parsed.hostname) && !isLocalHost(browserHost)) {
+        parsed.hostname = browserHost;
+        targets.add(parsed.toString().replace(/\/+$/, ''));
+      }
+    } catch {
+      // Keep raw env value only when parsing fails.
+    }
+    return Array.from(targets);
+  }
+
+  const scheme = request.nextUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  targets.add(`${scheme}//${browserHost}:8081`);
+  return Array.from(targets);
+}
+
 export function middleware(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
 
@@ -16,8 +65,8 @@ export function middleware(request: NextRequest) {
 
   const connectTargets = [
     "'self'",
-    apiBase,
-    wsBase,
+    ...resolveApiConnectTargets(request, apiBase),
+    ...resolveWsConnectTargets(request, wsBase),
     supabaseUrl,
     supabaseHost ? `https://${supabaseHost}` : '',
     supabaseHost ? `wss://${supabaseHost}` : '',
