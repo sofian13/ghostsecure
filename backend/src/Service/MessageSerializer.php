@@ -17,6 +17,7 @@ class MessageSerializer
             'createdAt' => $message->getCreatedAt()->format(DATE_ATOM),
             'expiresAt' => $message->getExpiresAt()?->format(DATE_ATOM),
             'ephemeralPublicKey' => $message->getEphemeralPublicKey(),
+            'ratchetHeader' => $message->getRatchetHeader(),
         ];
     }
 }

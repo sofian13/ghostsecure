@@ -14,6 +14,7 @@ type MessageRow = {
   created_at: string;
   expires_at: string | null;
   ephemeral_public_key: string | null;
+  ratchet_header: string | null;
 };
 
 export function useRealtime(session: Session | null, onMessage: (payload: unknown) => void): void {
@@ -48,6 +49,7 @@ export function useRealtime(session: Session | null, onMessage: (payload: unknow
               createdAt: row.created_at,
               expiresAt: row.expires_at,
               ephemeralPublicKey: row.ephemeral_public_key ?? null,
+              ratchetHeader: row.ratchet_header ?? null,
             },
           });
         }

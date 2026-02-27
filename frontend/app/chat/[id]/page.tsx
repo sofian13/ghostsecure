@@ -5,9 +5,10 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
 import { getSession } from '@/lib/session';
-import { addGroupMember, fetchConversationDetail, fetchMessages, leaveGroupConversation, sendMessage } from '@/lib/api';
+import { addGroupMember, fetchConversationDetail, fetchMessages, fetchPreKeyBundle, leaveGroupConversation, sendMessage } from '@/lib/api';
 import { encryptForParticipants, generateSafetyNumber } from '@/lib/crypto';
 import { decryptForUser, type DecryptedMessage } from '@/lib/messages';
+import { hasRatchetSession, createOutboundSession, encryptRatchet } from '@/lib/ratchet';
 import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
 import type { EncryptedMessage, Session } from '@/types';
@@ -146,20 +147,49 @@ export default function ConversationPage() {
     if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
   });
 
+  const encryptAndSend = async (s: Session, plaintext: string): Promise<DecryptedMessage | null> => {
+    const detail = await fetchConversationDetail(s, conversationId);
+    const peer = detail.kind === 'direct'
+      ? detail.participants.find((p) => p.id !== s.userId)
+      : undefined;
+
+    // Try Double Ratchet for direct conversations
+    if (detail.kind === 'direct' && peer) {
+      try {
+        const hasSession = await hasRatchetSession(conversationId);
+        if (!hasSession && peer.identityKey && peer.signedPrekey && peer.signedPrekeySignature && peer.registrationId) {
+          // Fetch full bundle (consumes an OTK) and create outbound session
+          const bundle = await fetchPreKeyBundle(s, peer.id);
+          await createOutboundSession(s.userId, conversationId, bundle);
+        }
+
+        if (await hasRatchetSession(conversationId)) {
+          const encrypted = await encryptRatchet(s.userId, conversationId, plaintext, s.userId, peer.id);
+          const sent = await sendMessage(s, conversationId, encrypted);
+          return decryptForUser(s.userId, sent, conversationId);
+        }
+      } catch {
+        // Fallback to ECDH/RSA on ratchet failure
+      }
+    }
+
+    // Fallback: existing ECDH/RSA encryption
+    const encrypted = await encryptForParticipants(
+      plaintext,
+      detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey, ecdhPublicKey: p.ecdhPublicKey })),
+      conversationId,
+      s.userId
+    );
+    const sent = await sendMessage(s, conversationId, { ...encrypted });
+    return decryptForUser(s.userId, sent, conversationId);
+  };
+
   const sendText = async (e: FormEvent) => {
     e.preventDefault();
     if (!session || !input.trim()) return;
 
     try {
-      const detail = await fetchConversationDetail(session, conversationId);
-      const encrypted = await encryptForParticipants(
-        input.trim(),
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey, ecdhPublicKey: p.ecdhPublicKey })),
-        conversationId,
-        session.userId
-      );
-      const sent = await sendMessage(session, conversationId, { ...encrypted });
-      const decrypted = await decryptForUser(session.userId, sent, conversationId);
+      const decrypted = await encryptAndSend(session, input.trim());
       if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
       setInput('');
     } catch (err) {
@@ -226,7 +256,6 @@ export default function ConversationPage() {
   const sendDraftVoice = async () => {
     if (!session || !draftVoiceBlob) return;
     try {
-      const detail = await fetchConversationDetail(session, conversationId);
       const bytes = new Uint8Array(await draftVoiceBlob.arrayBuffer());
       let binary = '';
       for (const b of bytes) binary += String.fromCharCode(b);
@@ -236,14 +265,7 @@ export default function ConversationPage() {
         dataBase64: btoa(binary),
         durationMs: draftVoiceDurationMs || 1000,
       });
-      const encrypted = await encryptForParticipants(
-        payload,
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey, ecdhPublicKey: p.ecdhPublicKey })),
-        conversationId,
-        session.userId
-      );
-      const sent = await sendMessage(session, conversationId, { ...encrypted });
-      const decrypted = await decryptForUser(session.userId, sent, conversationId);
+      const decrypted = await encryptAndSend(session, payload);
       if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
       discardDraftVoice();
     } catch {
@@ -272,15 +294,7 @@ export default function ConversationPage() {
         sizeBytes: file.size,
       });
 
-      const detail = await fetchConversationDetail(session, conversationId);
-      const encrypted = await encryptForParticipants(
-        payload,
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey, ecdhPublicKey: p.ecdhPublicKey })),
-        conversationId,
-        session.userId
-      );
-      const sent = await sendMessage(session, conversationId, { ...encrypted });
-      const decrypted = await decryptForUser(session.userId, sent, conversationId);
+      const decrypted = await encryptAndSend(session, payload);
       if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
     } catch {
       setError("Erreur envoi piece jointe");

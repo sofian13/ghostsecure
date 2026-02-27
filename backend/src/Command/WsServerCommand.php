@@ -238,7 +238,7 @@ class WsServerCommand extends Command implements MessageComponentInterface
             }
 
             $rows = $this->db->fetchAllAssociative(
-                'SELECT m.id, m.conversation_id, m.ciphertext, m.iv, m.wrapped_keys, m.created_at, m.expires_at, m.ephemeral_public_key
+                'SELECT m.id, m.conversation_id, m.ciphertext, m.iv, m.wrapped_keys, m.created_at, m.expires_at, m.ephemeral_public_key, m.ratchet_header
                  FROM message m
                  INNER JOIN conversation_member cm ON cm.conversation_id = m.conversation_id
                  WHERE cm.user_id = :uid AND m.created_at > :last_at
@@ -272,6 +272,7 @@ class WsServerCommand extends Command implements MessageComponentInterface
                         'createdAt' => (new \DateTimeImmutable((string) $row['created_at']))->format(DATE_ATOM),
                         'expiresAt' => $row['expires_at'] ? (new \DateTimeImmutable((string) $row['expires_at']))->format(DATE_ATOM) : null,
                         'ephemeralPublicKey' => $row['ephemeral_public_key'] ?? null,
+                        'ratchetHeader' => $row['ratchet_header'] ?? null,
                     ],
                 ];
 

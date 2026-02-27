@@ -1,4 +1,5 @@
 import { decryptIncomingMessage } from '@/lib/crypto';
+import { decryptRatchet } from '@/lib/ratchet';
 import type { EncryptedMessage } from '@/types';
 
 export type DecryptedMessage = {
@@ -29,19 +30,27 @@ export async function decryptForUser(userId: string, message: EncryptedMessage, 
   if (!wrappedKey) return null;
 
   try {
-    const rawPayload = await decryptIncomingMessage(userId, {
-      ciphertext: message.ciphertext,
-      iv: message.iv,
-      wrappedKey,
-      ephemeralPublicKey: message.ephemeralPublicKey,
-    }, conversationId, message.createdAt);
+    let rawPayload: string;
+
+    if (message.ratchetHeader && conversationId) {
+      // v3: Double Ratchet decryption
+      rawPayload = await decryptRatchet(userId, conversationId, message.ciphertext, message.ratchetHeader);
+    } else {
+      // v2/v1: ECDH/RSA decryption
+      rawPayload = await decryptIncomingMessage(userId, {
+        ciphertext: message.ciphertext,
+        iv: message.iv,
+        wrappedKey,
+        ephemeralPublicKey: message.ephemeralPublicKey,
+      }, conversationId, message.createdAt);
+    }
 
     // Sealed sender: extract senderId from encrypted envelope
     let senderId = message.senderId ?? 'unknown';
     let actualPayload = rawPayload;
     try {
       const envelope = JSON.parse(rawPayload) as { v?: number; s?: string; c?: string };
-      if (envelope.v === 2 && envelope.s && envelope.c !== undefined) {
+      if ((envelope.v === 2 || envelope.v === 3) && envelope.s && envelope.c !== undefined) {
         senderId = envelope.s;
         actualPayload = envelope.c;
       }

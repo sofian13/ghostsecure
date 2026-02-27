@@ -9,6 +9,10 @@ export type UserProfile = {
   id: string;
   publicKey: string;
   ecdhPublicKey?: string;
+  identityKey?: string;
+  signedPrekey?: string;
+  signedPrekeySignature?: string;
+  registrationId?: number;
 };
 
 export type Conversation = {
@@ -30,6 +34,16 @@ export type EncryptedMessage = {
   createdAt: string;
   expiresAt: string | null;
   ephemeralPublicKey?: string | null;
+  ratchetHeader?: string | null;
+};
+
+export type PreKeyBundle = {
+  userId: string;
+  identityKey: string;
+  signedPrekey: string;
+  signedPrekeySignature: string;
+  registrationId: number;
+  oneTimePreKey?: { keyId: number; publicKey: string };
 };
 
 export type ConversationDetail = {

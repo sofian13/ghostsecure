@@ -21,6 +21,18 @@ class User
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $ecdhPublicKey = null;
 
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $identityKey = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $signedPrekey = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $signedPrekeySignature = null;
+
+    #[ORM\Column(type: 'integer', nullable: true)]
+    private ?int $registrationId = null;
+
     #[ORM\Column(type: 'datetime_immutable')]
     private \DateTimeImmutable $createdAt;
 
@@ -59,5 +71,45 @@ class User
     public function setEcdhPublicKey(?string $ecdhPublicKey): void
     {
         $this->ecdhPublicKey = $ecdhPublicKey;
+    }
+
+    public function getIdentityKey(): ?string
+    {
+        return $this->identityKey;
+    }
+
+    public function setIdentityKey(?string $identityKey): void
+    {
+        $this->identityKey = $identityKey;
+    }
+
+    public function getSignedPrekey(): ?string
+    {
+        return $this->signedPrekey;
+    }
+
+    public function setSignedPrekey(?string $signedPrekey): void
+    {
+        $this->signedPrekey = $signedPrekey;
+    }
+
+    public function getSignedPrekeySignature(): ?string
+    {
+        return $this->signedPrekeySignature;
+    }
+
+    public function setSignedPrekeySignature(?string $signedPrekeySignature): void
+    {
+        $this->signedPrekeySignature = $signedPrekeySignature;
+    }
+
+    public function getRegistrationId(): ?int
+    {
+        return $this->registrationId;
+    }
+
+    public function setRegistrationId(?int $registrationId): void
+    {
+        $this->registrationId = $registrationId;
     }
 }

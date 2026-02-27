@@ -3,7 +3,8 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ensureIdentity } from '@/lib/crypto';
-import { loginUser, registerUser } from '@/lib/api';
+import { loginUser, registerUser, uploadPreKeyBundle, fetchOtkCount } from '@/lib/api';
+import { initRatchetIdentity, exportPreKeyBundle, generateNewPreKeys } from '@/lib/ratchet';
 import { setSession } from '@/lib/session';
 
 type AuthMode = 'login' | 'register';
@@ -33,10 +34,47 @@ export default function LoginPage() {
     setError(null);
     try {
       const keys = await ensureIdentity(userId);
+
+      // Generate Signal Protocol identity and pre-key bundle
+      let preKeyBundle: Awaited<ReturnType<typeof exportPreKeyBundle>> | undefined;
+      try {
+        const ratchetId = await initRatchetIdentity(userId);
+        preKeyBundle = await exportPreKeyBundle(ratchetId);
+      } catch {
+        // Non-fatal: ratchet features will be unavailable
+      }
+
       const session =
         mode === 'register'
-          ? await registerUser(keys.publicKey, userId, password, keys.proof, keys.ecdhPublicKey)
+          ? await registerUser(keys.publicKey, userId, password, keys.proof, keys.ecdhPublicKey, preKeyBundle)
           : await loginUser(userId, password);
+
+      // On login, upload pre-key bundle if available
+      if (mode === 'login' && preKeyBundle) {
+        try {
+          await uploadPreKeyBundle(session, preKeyBundle);
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      // OTK replenishment: ensure at least 10 one-time pre-keys on server
+      try {
+        const otkCount = await fetchOtkCount(session);
+        if (otkCount < 10) {
+          const needed = 20 - otkCount;
+          const newKeys = await generateNewPreKeys(userId, needed);
+          await uploadPreKeyBundle(session, {
+            identityKey: preKeyBundle?.identityKey ?? '',
+            signedPrekey: preKeyBundle?.signedPrekey ?? '',
+            signedPrekeySignature: preKeyBundle?.signedPrekeySignature ?? '',
+            registrationId: preKeyBundle?.registrationId ?? 0,
+            oneTimePreKeys: newKeys,
+          });
+        }
+      } catch {
+        // Non-fatal
+      }
 
       setSession(session);
       router.replace('/chat');

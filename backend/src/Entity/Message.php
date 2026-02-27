@@ -38,6 +38,9 @@ class Message
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $ephemeralPublicKey = null;
 
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $ratchetHeader = null;
+
     public function __construct(
         string $id,
         Conversation $conversation,
@@ -46,7 +49,8 @@ class Message
         string $iv,
         array $wrappedKeys,
         ?\DateTimeImmutable $expiresAt,
-        ?string $ephemeralPublicKey = null
+        ?string $ephemeralPublicKey = null,
+        ?string $ratchetHeader = null
     ) {
         $this->id = $id;
         $this->conversation = $conversation;
@@ -57,6 +61,7 @@ class Message
         $this->createdAt = new \DateTimeImmutable();
         $this->expiresAt = $expiresAt;
         $this->ephemeralPublicKey = $ephemeralPublicKey;
+        $this->ratchetHeader = $ratchetHeader;
     }
 
     public function getId(): string
@@ -102,6 +107,11 @@ class Message
     public function getEphemeralPublicKey(): ?string
     {
         return $this->ephemeralPublicKey;
+    }
+
+    public function getRatchetHeader(): ?string
+    {
+        return $this->ratchetHeader;
     }
 
     public function isExpired(): bool

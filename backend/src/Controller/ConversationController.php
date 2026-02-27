@@ -130,7 +130,8 @@ class ConversationController
         }
 
         $rows = $this->em->getConnection()->fetchAllAssociative(
-            'SELECT u.id, u.public_key, u.ecdh_public_key FROM conversation_member cm
+            'SELECT u.id, u.public_key, u.ecdh_public_key, u.identity_key, u.signed_prekey, u.signed_prekey_signature, u.registration_id
+             FROM conversation_member cm
              INNER JOIN app_user u ON u.id = cm.user_id
              WHERE cm.conversation_id = :cid',
             ['cid' => $id]
@@ -140,6 +141,10 @@ class ConversationController
             'id' => $row['id'],
             'publicKey' => $row['public_key'],
             'ecdhPublicKey' => $row['ecdh_public_key'] ?? null,
+            'identityKey' => $row['identity_key'] ?? null,
+            'signedPrekey' => $row['signed_prekey'] ?? null,
+            'signedPrekeySignature' => $row['signed_prekey_signature'] ?? null,
+            'registrationId' => $row['registration_id'] ?? null,
         ], static fn ($v) => $v !== null), $rows);
 
         $conversation = $this->em->getRepository(Conversation::class)->find($id);
@@ -377,7 +382,8 @@ class ConversationController
         }
 
         $ephemeralPublicKey = trim((string) ($payload['ephemeralPublicKey'] ?? ''));
-        $message = new Message(self::uuid(), $conversation, $me, $ciphertext, $iv, $wrappedKeys, $expiresAt, $ephemeralPublicKey !== '' ? $ephemeralPublicKey : null);
+        $ratchetHeader = trim((string) ($payload['ratchetHeader'] ?? ''));
+        $message = new Message(self::uuid(), $conversation, $me, $ciphertext, $iv, $wrappedKeys, $expiresAt, $ephemeralPublicKey !== '' ? $ephemeralPublicKey : null, $ratchetHeader !== '' ? $ratchetHeader : null);
         $this->em->persist($message);
         $this->em->flush();
 

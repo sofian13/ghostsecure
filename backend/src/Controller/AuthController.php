@@ -97,9 +97,46 @@ class AuthController
         if ($ecdhPublicKey !== '') {
             $user->setEcdhPublicKey($ecdhPublicKey);
         }
+
+        // Optional inline pre-key bundle at registration
+        $preKeyBundle = $payload['preKeyBundle'] ?? null;
+        if (is_array($preKeyBundle)) {
+            $ik = trim((string) ($preKeyBundle['identityKey'] ?? ''));
+            $spk = trim((string) ($preKeyBundle['signedPrekey'] ?? ''));
+            $spkSig = trim((string) ($preKeyBundle['signedPrekeySignature'] ?? ''));
+            $regId = (int) ($preKeyBundle['registrationId'] ?? 0);
+            if ($ik !== '' && $spk !== '' && $spkSig !== '' && $regId > 0) {
+                $user->setIdentityKey($ik);
+                $user->setSignedPrekey($spk);
+                $user->setSignedPrekeySignature($spkSig);
+                $user->setRegistrationId($regId);
+            }
+        }
+
         $this->em->persist($user);
 
         $this->em->flush();
+
+        // Insert OTPKs after flush so user row exists
+        if (is_array($preKeyBundle) && is_array($preKeyBundle['oneTimePreKeys'] ?? null)) {
+            $conn = $this->em->getConnection();
+            foreach ($preKeyBundle['oneTimePreKeys'] as $otpk) {
+                if (!is_array($otpk)) {
+                    continue;
+                }
+                $keyId = (int) ($otpk['keyId'] ?? 0);
+                $pk = trim((string) ($otpk['publicKey'] ?? ''));
+                if ($keyId <= 0 || $pk === '') {
+                    continue;
+                }
+                $conn->executeStatement(
+                    'INSERT INTO one_time_prekey (id, user_id, key_id, public_key, created_at)
+                     VALUES (gen_random_uuid(), :uid, :kid, :pk, NOW())
+                     ON CONFLICT (user_id, key_id) DO NOTHING',
+                    ['uid' => $userId, 'kid' => $keyId, 'pk' => $pk]
+                );
+            }
+        }
         $token = $this->auth->issueToken($user);
         $ttl = $this->auth->getSessionTtl();
         $this->logger->info('User registered', ['userId' => $userId]);

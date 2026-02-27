@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '@/lib/supabase';
-import type { Conversation, ConversationDetail, EncryptedMessage, Session } from '@/types';
+import type { Conversation, ConversationDetail, EncryptedMessage, PreKeyBundle, Session } from '@/types';
 
 type FriendRequest = {
   id: string;
@@ -120,11 +120,25 @@ async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Ses
   return parsed as T;
 }
 
-export async function registerUser(publicKey: string, userId: string, password: string, proof?: string, ecdhPublicKey?: string): Promise<Session> {
+export async function registerUser(
+  publicKey: string,
+  userId: string,
+  password: string,
+  proof?: string,
+  ecdhPublicKey?: string,
+  preKeyBundle?: {
+    identityKey: string;
+    signedPrekey: string;
+    signedPrekeySignature: string;
+    registrationId: number;
+    oneTimePreKeys: { keyId: number; publicKey: string }[];
+  }
+): Promise<Session> {
   const normalized = normalizeUserId(userId);
-  const body: Record<string, string> = { userId: normalized, publicKey, secret: password };
+  const body: Record<string, unknown> = { userId: normalized, publicKey, secret: password };
   if (proof) body.proof = proof;
   if (ecdhPublicKey) body.ecdhPublicKey = ecdhPublicKey;
+  if (preKeyBundle) body.preKeyBundle = preKeyBundle;
   const data = await apiRequest<{ userId: string; token?: string; expiresAt?: string }>(
     '/api/auth/register',
     {
@@ -224,6 +238,7 @@ export async function sendMessage(
     wrappedKeys: Record<string, string>;
     expiresInSeconds?: number;
     ephemeralPublicKey?: string;
+    ratchetHeader?: string;
   }
 ): Promise<EncryptedMessage> {
   return apiRequest<EncryptedMessage>(
@@ -253,6 +268,40 @@ export async function leaveGroupConversation(session: Session, conversationId: s
     { method: 'DELETE' },
     session
   );
+}
+
+export async function uploadPreKeyBundle(
+  session: Session,
+  bundle: {
+    identityKey: string;
+    signedPrekey: string;
+    signedPrekeySignature: string;
+    registrationId: number;
+    oneTimePreKeys: { keyId: number; publicKey: string }[];
+  }
+): Promise<void> {
+  await apiRequest<{ ok: boolean }>(
+    '/api/keys/bundle',
+    { method: 'POST', body: JSON.stringify(bundle) },
+    session
+  );
+}
+
+export async function fetchPreKeyBundle(session: Session, userId: string): Promise<PreKeyBundle> {
+  return apiRequest<PreKeyBundle>(
+    `/api/users/${encodeURIComponent(userId)}/keys/bundle`,
+    { method: 'GET' },
+    session
+  );
+}
+
+export async function fetchOtkCount(session: Session): Promise<number> {
+  const data = await apiRequest<{ count: number }>(
+    '/api/keys/count',
+    { method: 'GET' },
+    session
+  );
+  return data.count;
 }
 
 // Keeping friend/call flows on Supabase for now to avoid breaking existing realtime features.
