@@ -4,7 +4,6 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 're
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
-import MobileTabs from '@/components/MobileTabs';
 import { getSession } from '@/lib/session';
 import { addGroupMember, fetchConversationDetail, fetchMessages, leaveGroupConversation, sendMessage } from '@/lib/api';
 import { encryptForParticipants } from '@/lib/crypto';
@@ -340,76 +339,90 @@ export default function ConversationPage() {
     );
   }, [input, draftVoiceUrl, recording, startVoiceRecording, stopVoiceRecording]);
 
+  const groupedMessages = useMemo(() => {
+    const groups: { label: string; items: DecryptedMessage[] }[] = [];
+    let currentLabel = '';
+    for (const msg of messages) {
+      const label = dateSeparatorLabel(msg.createdAt);
+      if (label !== currentLabel) {
+        currentLabel = label;
+        groups.push({ label, items: [msg] });
+      } else {
+        groups[groups.length - 1].items.push(msg);
+      }
+    }
+    return groups;
+  }, [messages]);
+
   if (!session) return <main className="centered">Chargement...</main>;
 
   return (
     <SecurityShell userId={session.userId}>
-      <main className="mobile-screen mobile-conversation">
+      <main className="mobile-conversation">
         <header className="conversation-header">
           <button type="button" className="icon-btn" onClick={() => router.push('/chat')} aria-label="Retour">
             <BackArrowIcon />
           </button>
-          <div className="chat-avatar small" aria-hidden="true">{peerId.slice(0, 1).toUpperCase()}</div>
-          <div className="conversation-head-copy">
+          <div className="conv-avatar" aria-hidden="true">{peerId.slice(0, 1).toUpperCase()}</div>
+          <div className="conv-header-info">
             <strong>{peerId || 'Contact'}</strong>
             <span>{status}</span>
           </div>
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={() => router.push(`/call?target=${encodeURIComponent(peerId)}&autocall=1`)}
-            aria-label="Appeler"
-            disabled={conversationKind === 'group'}
-          >
-            <PhoneIcon />
-          </button>
-          <button type="button" className="icon-btn" onClick={() => router.push('/settings')} aria-label="Options">
-            <MoreDotsIcon />
-          </button>
+          <div className="conv-header-actions">
+            {conversationKind !== 'group' && (
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => router.push(`/call?target=${encodeURIComponent(peerId)}&autocall=1`)}
+                aria-label="Appeler"
+              >
+                <PhoneIcon />
+              </button>
+            )}
+            <button type="button" className="icon-btn" aria-label="Chiffrement">
+              <LockIcon />
+            </button>
+          </div>
         </header>
 
-        <div className="security-pill">Chiffrement de bout en bout active</div>
-
         {conversationKind === 'group' && (
-          <section className="inline-card">
-            <div className="row">
-              <button
-                type="button"
-                className="ghost-secondary"
-                onClick={async () => {
-                  if (!session) return;
-                  const nextUserId = window.prompt('ID utilisateur a ajouter au groupe');
-                  if (!nextUserId?.trim()) return;
-                  try {
-                    await addGroupMember(session, conversationId, nextUserId.trim());
-                    await loadContext(session);
-                    setStatus(`${nextUserId.trim().toLowerCase()} ajoute au groupe`);
-                  } catch (err) {
-                    setError(normalizeError(err, 'Erreur ajout membre'));
-                  }
-                }}
-              >
-                Ajouter membre
-              </button>
-              <button
-                type="button"
-                className="ghost-secondary"
-                onClick={async () => {
-                  if (!session) return;
-                  const ok = window.confirm('Quitter ce groupe ?');
-                  if (!ok) return;
-                  try {
-                    await leaveGroupConversation(session, conversationId);
-                    router.push('/chat');
-                  } catch (err) {
-                    setError(normalizeError(err, 'Erreur sortie groupe'));
-                  }
-                }}
-              >
-                Quitter groupe
-              </button>
-            </div>
-          </section>
+          <div className="conv-group-bar">
+            <button
+              type="button"
+              className="ghost-secondary"
+              onClick={async () => {
+                if (!session) return;
+                const nextUserId = window.prompt('ID utilisateur a ajouter au groupe');
+                if (!nextUserId?.trim()) return;
+                try {
+                  await addGroupMember(session, conversationId, nextUserId.trim());
+                  await loadContext(session);
+                  setStatus(`${nextUserId.trim().toLowerCase()} ajoute au groupe`);
+                } catch (err) {
+                  setError(normalizeError(err, 'Erreur ajout membre'));
+                }
+              }}
+            >
+              Ajouter membre
+            </button>
+            <button
+              type="button"
+              className="ghost-secondary"
+              onClick={async () => {
+                if (!session) return;
+                const ok = window.confirm('Quitter ce groupe ?');
+                if (!ok) return;
+                try {
+                  await leaveGroupConversation(session, conversationId);
+                  router.push('/chat');
+                } catch (err) {
+                  setError(normalizeError(err, 'Erreur sortie groupe'));
+                }
+              }}
+            >
+              Quitter groupe
+            </button>
+          </div>
         )}
 
         {incomingCallFrom && (
@@ -429,18 +442,32 @@ export default function ConversationPage() {
         )}
 
         <section className="message-thread" ref={listRef}>
-          {messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              kind={msg.kind}
-              text={msg.text}
-              voice={msg.voice}
-              file={msg.file}
-              mine={msg.senderId === session.userId}
-              createdAt={msg.createdAt}
-              status={msg.senderId === session.userId ? 'sent' : 'received'}
-              expiresAt={msg.expiresAt}
-            />
+          <div className="security-pill">Chiffrement de bout en bout active</div>
+
+          {messages.length === 0 && (
+            <div className="conv-empty">
+              <p>Aucun message</p>
+              <p>Demarrez la conversation</p>
+            </div>
+          )}
+
+          {groupedMessages.map((group) => (
+            <div key={group.label}>
+              <div className="date-separator"><span>{group.label}</span></div>
+              {group.items.map((msg) => (
+                <MessageBubble
+                  key={msg.id}
+                  kind={msg.kind}
+                  text={msg.text}
+                  voice={msg.voice}
+                  file={msg.file}
+                  mine={msg.senderId === session.userId}
+                  createdAt={msg.createdAt}
+                  status={msg.senderId === session.userId ? 'sent' : 'received'}
+                  expiresAt={msg.expiresAt}
+                />
+              ))}
+            </div>
           ))}
         </section>
 
@@ -458,6 +485,15 @@ export default function ConversationPage() {
             </div>
           </section>
         )}
+
+        {recording && (
+          <div className="recording-indicator">
+            <span className="recording-dot" />
+            <span>Enregistrement {Math.ceil(recordingMs / 1000)}s</span>
+          </div>
+        )}
+
+        {error && <div className="conv-error-toast">{error}</div>}
 
         <form className="composer" onSubmit={sendText}>
           <button
@@ -478,16 +514,6 @@ export default function ConversationPage() {
           />
           {rightAction}
         </form>
-
-        {recording && (
-          <div className="recording-indicator">
-            <span className="recording-dot" />
-            <span>Enregistrement {Math.ceil(recordingMs / 1000)}s</span>
-          </div>
-        )}
-        {error && <p className="error-text">{error}</p>}
-
-        <MobileTabs />
       </main>
     </SecurityShell>
   );
@@ -511,18 +537,30 @@ function sortAndDedupe(items: DecryptedMessage[]): DecryptedMessage[] {
   });
 }
 
-function BackArrowIcon() {
+function dateSeparatorLabel(raw: string): string {
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const msgDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today.getTime() - msgDay.getTime()) / 86400000);
+  if (diffDays === 0) return "Aujourd'hui";
+  if (diffDays === 1) return 'Hier';
+  return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function LockIcon() {
   return (
     <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M15.7 4.3a1 1 0 0 1 0 1.4L9.4 12l6.3 6.3a1 1 0 0 1-1.4 1.4l-7-7a1 1 0 0 1 0-1.4l7-7a1 1 0 0 1 1.4 0Z" />
+      <path d="M12 2a5 5 0 0 1 5 5v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1V7a5 5 0 0 1 5-5Zm0 2a3 3 0 0 0-3 3v3h6V7a3 3 0 0 0-3-3Zm0 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
     </svg>
   );
 }
 
-function MoreDotsIcon() {
+function BackArrowIcon() {
   return (
     <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4Zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4Zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z" />
+      <path d="M15.7 4.3a1 1 0 0 1 0 1.4L9.4 12l6.3 6.3a1 1 0 0 1-1.4 1.4l-7-7a1 1 0 0 1 0-1.4l7-7a1 1 0 0 1 1.4 0Z" />
     </svg>
   );
 }
