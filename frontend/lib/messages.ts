@@ -32,6 +32,8 @@ export async function decryptForUser(userId: string, message: EncryptedMessage, 
   try {
     let rawPayload: string;
 
+    console.debug('[GS:decrypt]', message.id, '| ratchet:', !!message.ratchetHeader, '| ecdh:', !!message.ephemeralPublicKey, '| userId:', userId);
+
     if (message.ratchetHeader && conversationId) {
       // v3: Double Ratchet decryption
       rawPayload = await decryptRatchet(userId, conversationId, message.ciphertext, message.ratchetHeader);
@@ -99,7 +101,8 @@ export async function decryptForUser(userId: string, message: EncryptedMessage, 
       createdAt: message.createdAt,
       expiresAt: message.expiresAt,
     };
-  } catch {
+  } catch (err) {
+    console.warn('[GS:decrypt] FAIL', message.id, '| error:', err instanceof Error ? err.message : err);
     return null;
   }
 }

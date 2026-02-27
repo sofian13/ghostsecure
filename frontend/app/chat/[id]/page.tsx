@@ -87,7 +87,18 @@ export default function ConversationPage() {
     const newDecrypted = await Promise.all(
       newMessages.map(async (m) => {
         const result = await decryptForUser(s.userId, m, conversationId);
-        if (!result) console.warn('[GS:poll] FAILED to decrypt msg', m.id, '- userId:', s.userId, 'keys:', Object.keys(m.wrappedKeys));
+        if (!result) {
+          console.warn('[GS:poll] FAILED to decrypt msg', m.id, '- userId:', s.userId, 'keys:', Object.keys(m.wrappedKeys));
+          // Show undecryptable messages as placeholder instead of hiding them
+          return {
+            id: m.id,
+            senderId: m.senderId ?? 'unknown',
+            kind: 'text' as const,
+            text: '\u{1F512} Message chiffre (indechiffrable)',
+            createdAt: m.createdAt,
+            expiresAt: m.expiresAt,
+          } satisfies DecryptedMessage;
+        }
         return result;
       })
     );
