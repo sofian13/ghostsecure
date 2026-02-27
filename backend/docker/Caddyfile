@@ -1,19 +1,6 @@
 :8000 {
 	root * /app/public
 
-	@api path /api/*
-	header @api Access-Control-Allow-Origin "*"
-	header @api Access-Control-Allow-Headers "Content-Type, Authorization"
-	header @api Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS"
-	header @api Access-Control-Allow-Credentials "false"
-	header @api Vary "Origin"
-
-	@api_preflight {
-		method OPTIONS
-		path /api/*
-	}
-	respond @api_preflight 204
-
 	php_fastcgi 127.0.0.1:9000
 
 	file_server
