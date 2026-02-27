@@ -35,6 +35,9 @@ class Message
     #[ORM\Column(type: 'datetime_immutable', nullable: true)]
     private ?\DateTimeImmutable $expiresAt;
 
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $ephemeralPublicKey = null;
+
     public function __construct(
         string $id,
         Conversation $conversation,
@@ -42,7 +45,8 @@ class Message
         string $ciphertext,
         string $iv,
         array $wrappedKeys,
-        ?\DateTimeImmutable $expiresAt
+        ?\DateTimeImmutable $expiresAt,
+        ?string $ephemeralPublicKey = null
     ) {
         $this->id = $id;
         $this->conversation = $conversation;
@@ -52,6 +56,7 @@ class Message
         $this->wrappedKeys = $wrappedKeys;
         $this->createdAt = new \DateTimeImmutable();
         $this->expiresAt = $expiresAt;
+        $this->ephemeralPublicKey = $ephemeralPublicKey;
     }
 
     public function getId(): string
@@ -92,6 +97,11 @@ class Message
     public function getExpiresAt(): ?\DateTimeImmutable
     {
         return $this->expiresAt;
+    }
+
+    public function getEphemeralPublicKey(): ?string
+    {
+        return $this->ephemeralPublicKey;
     }
 
     public function isExpired(): bool

@@ -1,6 +1,6 @@
 export type Session = {
   userId: string;
-  token: string;
+  token?: string;
   issuedAt: string;
   expiresAt: string;
 };
@@ -8,6 +8,7 @@ export type Session = {
 export type UserProfile = {
   id: string;
   publicKey: string;
+  ecdhPublicKey?: string;
 };
 
 export type Conversation = {
@@ -22,12 +23,13 @@ export type Conversation = {
 
 export type EncryptedMessage = {
   id: string;
-  senderId: string;
+  senderId: string | null;
   ciphertext: string;
   iv: string;
   wrappedKeys: Record<string, string>;
   createdAt: string;
   expiresAt: string | null;
+  ephemeralPublicKey?: string | null;
 };
 
 export type ConversationDetail = {

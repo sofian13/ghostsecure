@@ -29,16 +29,30 @@ export async function decryptForUser(userId: string, message: EncryptedMessage, 
   if (!wrappedKey) return null;
 
   try {
-    const payload = await decryptIncomingMessage(userId, {
+    const rawPayload = await decryptIncomingMessage(userId, {
       ciphertext: message.ciphertext,
       iv: message.iv,
       wrappedKey,
-    }, conversationId);
+      ephemeralPublicKey: message.ephemeralPublicKey,
+    }, conversationId, message.createdAt);
+
+    // Sealed sender: extract senderId from encrypted envelope
+    let senderId = message.senderId ?? 'unknown';
+    let actualPayload = rawPayload;
+    try {
+      const envelope = JSON.parse(rawPayload) as { v?: number; s?: string; c?: string };
+      if (envelope.v === 2 && envelope.s && envelope.c !== undefined) {
+        senderId = envelope.s;
+        actualPayload = envelope.c;
+      }
+    } catch {
+      // Not an envelope — use raw payload
+    }
 
     let voice: DecryptedMessage['voice'];
     let file: DecryptedMessage['file'];
     try {
-      const parsed = JSON.parse(payload) as {
+      const parsed = JSON.parse(actualPayload) as {
         type?: string;
         mimeType?: string;
         dataBase64?: string;
@@ -68,9 +82,9 @@ export async function decryptForUser(userId: string, message: EncryptedMessage, 
 
     return {
       id: message.id,
-      senderId: message.senderId,
+      senderId,
       kind: voice ? 'voice' : file ? 'file' : 'text',
-      text: voice || file ? undefined : payload,
+      text: voice || file ? undefined : actualPayload,
       voice,
       file,
       createdAt: message.createdAt,

@@ -78,7 +78,7 @@ export function middleware(request: NextRequest) {
     "frame-ancestors 'none'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "style-src 'self' 'unsafe-inline'",
+    `style-src 'self' 'nonce-${nonce}'`,
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     `script-src-elem 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     `connect-src ${connectTargets}`,
@@ -91,7 +91,6 @@ export function middleware(request: NextRequest) {
 
   const response = NextResponse.next();
   response.headers.set('Content-Security-Policy', csp);
-  response.headers.set('x-nonce', nonce);
   return response;
 }
 

@@ -70,19 +70,45 @@ class AuthController
             return $this->json->error('Invalid public key format.', 422);
         }
 
+        $proof = trim((string) ($payload['proof'] ?? ''));
+        if ($proof !== '') {
+            $derBytes = base64_decode($publicKey, true);
+            if ($derBytes === false) {
+                return $this->json->error('Invalid public key encoding.', 422);
+            }
+            $pem = "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($derBytes), 64, "\n") . "-----END PUBLIC KEY-----";
+            $sig = base64_decode($proof, true);
+            if ($sig === false) {
+                return $this->json->error('Invalid proof encoding.', 422);
+            }
+            $pubKeyResource = openssl_pkey_get_public($pem);
+            if ($pubKeyResource === false) {
+                return $this->json->error('Invalid public key for proof verification.', 422);
+            }
+            $ok = openssl_verify($userId, $sig, $pubKeyResource, OPENSSL_ALGO_SHA256);
+            if ($ok !== 1) {
+                return $this->json->error('Proof of key possession failed.', 422);
+            }
+        }
+
         $user = new User($userId, $publicKey);
         $user->setSecretHash(password_hash($secret, PASSWORD_DEFAULT));
+        $ecdhPublicKey = trim((string) ($payload['ecdhPublicKey'] ?? ''));
+        if ($ecdhPublicKey !== '') {
+            $user->setEcdhPublicKey($ecdhPublicKey);
+        }
         $this->em->persist($user);
 
         $this->em->flush();
         $token = $this->auth->issueToken($user);
+        $ttl = $this->auth->getSessionTtl();
         $this->logger->info('User registered', ['userId' => $userId]);
 
-        return $this->json->ok([
+        return $this->json->okWithCookie([
             'userId' => $user->getId(),
-            'token' => $token,
             'publicKey' => $user->getPublicKey(),
-        ], 201);
+            'expiresAt' => (new \DateTimeImmutable(sprintf('+%d seconds', $ttl)))->format(DATE_ATOM),
+        ], $token, $ttl, 201);
     }
 
     #[Route('/auth/login', name: 'api_auth_login', methods: ['POST', 'OPTIONS'])]
@@ -143,15 +169,16 @@ class AuthController
         }
 
         $token = $this->auth->issueToken($user);
+        $ttl = $this->auth->getSessionTtl();
         $this->throttle->reset('login_user', $userScopeKey);
         $this->throttle->reset('login_user_only', $userOnlyKey);
         $this->logger->info('Login success', ['userId' => $userId]);
 
-        return $this->json->ok([
+        return $this->json->okWithCookie([
             'userId' => $user->getId(),
-            'token' => $token,
             'publicKey' => $user->getPublicKey(),
-        ]);
+            'expiresAt' => (new \DateTimeImmutable(sprintf('+%d seconds', $ttl)))->format(DATE_ATOM),
+        ], $token, $ttl);
     }
 
     #[Route('/auth/logout', name: 'api_auth_logout', methods: ['POST', 'OPTIONS'])]
@@ -161,11 +188,18 @@ class AuthController
             return $this->json->ok(['ok' => true]);
         }
 
+        $token = '';
         $auth = trim((string) $request->headers->get('Authorization', ''));
-        if (!str_starts_with($auth, 'Bearer ')) {
+        if (str_starts_with($auth, 'Bearer ')) {
+            $token = substr($auth, 7);
+        }
+        if ($token === '') {
+            $token = (string) $request->cookies->get('ghost_token', '');
+        }
+        if ($token === '') {
             return $this->json->error('Missing token.', 401);
         }
-        $token = substr($auth, 7);
+
         $tokenHash = hash('sha256', $token);
 
         $this->em->getConnection()->executeStatement(
@@ -173,7 +207,9 @@ class AuthController
             ['hash' => $tokenHash]
         );
 
-        return $this->json->ok(['ok' => true]);
+        $response = $this->json->ok(['ok' => true]);
+        $response->headers->clearCookie('ghost_token', '/');
+        return $response;
     }
 
     #[Route('/auth/logout-all', name: 'api_auth_logout_all', methods: ['POST', 'OPTIONS'])]

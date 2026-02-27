@@ -18,7 +18,41 @@ function safeParse(raw: string): Session | LegacySession | null {
 
 export function getSession(): Session | null {
   if (typeof window === 'undefined') return null;
-  const raw = window.sessionStorage.getItem(KEY) ?? window.localStorage.getItem(KEY);
+
+  const sessionRaw = window.sessionStorage.getItem(KEY);
+  const localRaw = window.localStorage.getItem(KEY);
+
+  // Migrate from localStorage to sessionStorage if found there
+  if (localRaw && !sessionRaw) {
+    const localParsed = safeParse(localRaw);
+    window.localStorage.removeItem(KEY);
+
+    if (localParsed) {
+      // Force re-auth if legacy token is older than 1 hour
+      const age = 'issuedAt' in localParsed
+        ? Date.now() - Date.parse(localParsed.issuedAt)
+        : Infinity;
+      if (age > 60 * 60 * 1000) {
+        return null;
+      }
+      const migrated: Session = {
+        userId: localParsed.userId,
+        token: localParsed.token,
+        issuedAt: 'issuedAt' in localParsed ? localParsed.issuedAt : new Date().toISOString(),
+        expiresAt: 'expiresAt' in localParsed ? localParsed.expiresAt : new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+      };
+      setSession(migrated);
+      return migrated;
+    }
+    return null;
+  }
+
+  // Always remove stale localStorage entry
+  if (localRaw) {
+    window.localStorage.removeItem(KEY);
+  }
+
+  const raw = sessionRaw;
   if (!raw) return null;
   const parsed = safeParse(raw);
   if (!parsed) return null;
@@ -50,10 +84,12 @@ export function getSession(): Session | null {
 export function setSession(session: Session): void {
   const safeSession: Session = {
     userId: session.userId,
-    token: session.token,
     issuedAt: session.issuedAt || new Date().toISOString(),
     expiresAt: session.expiresAt || new Date(Date.now() + SESSION_TTL_MS).toISOString(),
   };
+  if (session.token) {
+    safeSession.token = session.token;
+  }
   window.sessionStorage.setItem(KEY, JSON.stringify(safeSession));
   window.localStorage.removeItem(KEY);
 }

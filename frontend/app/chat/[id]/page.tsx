@@ -154,8 +154,9 @@ export default function ConversationPage() {
       const detail = await fetchConversationDetail(session, conversationId);
       const encrypted = await encryptForParticipants(
         input.trim(),
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey })),
-        conversationId
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey, ecdhPublicKey: p.ecdhPublicKey })),
+        conversationId,
+        session.userId
       );
       const sent = await sendMessage(session, conversationId, { ...encrypted });
       const decrypted = await decryptForUser(session.userId, sent, conversationId);
@@ -237,8 +238,9 @@ export default function ConversationPage() {
       });
       const encrypted = await encryptForParticipants(
         payload,
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey })),
-        conversationId
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey, ecdhPublicKey: p.ecdhPublicKey })),
+        conversationId,
+        session.userId
       );
       const sent = await sendMessage(session, conversationId, { ...encrypted });
       const decrypted = await decryptForUser(session.userId, sent, conversationId);
@@ -273,8 +275,9 @@ export default function ConversationPage() {
       const detail = await fetchConversationDetail(session, conversationId);
       const encrypted = await encryptForParticipants(
         payload,
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey })),
-        conversationId
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey, ecdhPublicKey: p.ecdhPublicKey })),
+        conversationId,
+        session.userId
       );
       const sent = await sendMessage(session, conversationId, { ...encrypted });
       const decrypted = await decryptForUser(session.userId, sent, conversationId);

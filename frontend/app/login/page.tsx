@@ -35,7 +35,7 @@ export default function LoginPage() {
       const keys = await ensureIdentity(userId);
       const session =
         mode === 'register'
-          ? await registerUser(keys.publicKey, userId, password)
+          ? await registerUser(keys.publicKey, userId, password, keys.proof, keys.ecdhPublicKey)
           : await loginUser(userId, password);
 
       setSession(session);

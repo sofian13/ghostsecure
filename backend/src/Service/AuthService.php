@@ -15,12 +15,19 @@ class AuthService
 
     public function requireUser(Request $request): ?User
     {
+        $token = '';
+
+        // Try Bearer token first (backward compat)
         $auth = $request->headers->get('Authorization', '');
-        if (!str_starts_with($auth, 'Bearer ')) {
-            return null;
+        if (str_starts_with($auth, 'Bearer ')) {
+            $token = trim(substr($auth, 7));
         }
 
-        $token = trim(substr($auth, 7));
+        // Fallback to httpOnly cookie
+        if ($token === '') {
+            $token = (string) $request->cookies->get('ghost_token', '');
+        }
+
         if ($token === '') {
             return null;
         }
@@ -36,10 +43,15 @@ class AuthService
         return $session->getUser();
     }
 
+    public function getSessionTtl(): int
+    {
+        return $this->readIntEnv('APP_SESSION_TTL_SECONDS', 43200);
+    }
+
     public function issueToken(User $user): string
     {
         $connection = $this->em->getConnection();
-        $ttlSeconds = $this->readIntEnv('APP_SESSION_TTL_SECONDS', 43200);
+        $ttlSeconds = $this->getSessionTtl();
         $maxSessions = $this->readIntEnv('APP_MAX_SESSIONS_PER_USER', 5);
 
         $connection->executeStatement('DELETE FROM user_session WHERE expires_at <= NOW()');

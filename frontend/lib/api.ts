@@ -51,14 +51,15 @@ function normalizeUserId(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function toSession(userId: string, token: string, expiresAt?: string): Session {
+function toSession(userId: string, expiresAt?: string, token?: string): Session {
   const now = new Date();
-  return {
+  const session: Session = {
     userId,
-    token,
     issuedAt: now.toISOString(),
     expiresAt: expiresAt ?? new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString(),
   };
+  if (token) session.token = token;
+  return session;
 }
 
 function toFriendRequest(row: FriendRequestRow): FriendRequest {
@@ -89,6 +90,7 @@ async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Ses
     response = await fetch(requestUrl, {
       ...init,
       headers,
+      credentials: 'include',
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown network error';
@@ -118,28 +120,31 @@ async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Ses
   return parsed as T;
 }
 
-export async function registerUser(publicKey: string, userId: string, password: string): Promise<Session> {
+export async function registerUser(publicKey: string, userId: string, password: string, proof?: string, ecdhPublicKey?: string): Promise<Session> {
   const normalized = normalizeUserId(userId);
-  const data = await apiRequest<{ userId: string; token: string }>(
+  const body: Record<string, string> = { userId: normalized, publicKey, secret: password };
+  if (proof) body.proof = proof;
+  if (ecdhPublicKey) body.ecdhPublicKey = ecdhPublicKey;
+  const data = await apiRequest<{ userId: string; token?: string; expiresAt?: string }>(
     '/api/auth/register',
     {
       method: 'POST',
-      body: JSON.stringify({ userId: normalized, publicKey, secret: password }),
+      body: JSON.stringify(body),
     }
   );
-  return toSession(data.userId, data.token);
+  return toSession(data.userId, data.expiresAt, data.token);
 }
 
 export async function loginUser(userId: string, password: string): Promise<Session> {
   const normalized = normalizeUserId(userId);
-  const data = await apiRequest<{ userId: string; token: string }>(
+  const data = await apiRequest<{ userId: string; token?: string; expiresAt?: string }>(
     '/api/auth/login',
     {
       method: 'POST',
       body: JSON.stringify({ userId: normalized, secret: password }),
     }
   );
-  return toSession(data.userId, data.token);
+  return toSession(data.userId, data.expiresAt, data.token);
 }
 
 export async function logoutUser(session: Session): Promise<void> {
@@ -218,6 +223,7 @@ export async function sendMessage(
     iv: string;
     wrappedKeys: Record<string, string>;
     expiresInSeconds?: number;
+    ephemeralPublicKey?: string;
   }
 ): Promise<EncryptedMessage> {
   return apiRequest<EncryptedMessage>(

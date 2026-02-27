@@ -24,6 +24,16 @@ type Props = {
   expiresAt: string | null;
 };
 
+const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const SAFE_AUDIO_TYPES = new Set(['audio/webm', 'audio/mp4', 'audio/mpeg']);
+
+function sanitizeMime(mime: string, kind: 'image' | 'audio' | 'file'): string {
+  const lower = mime.toLowerCase();
+  if (kind === 'image' && SAFE_IMAGE_TYPES.has(lower)) return lower;
+  if (kind === 'audio' && SAFE_AUDIO_TYPES.has(lower)) return lower;
+  return 'application/octet-stream';
+}
+
 function b64ToBytes(base64: string): Uint8Array {
   const raw = atob(base64);
   const bytes = new Uint8Array(raw.length);
@@ -47,17 +57,21 @@ export default function MessageBubble({ kind, text, voice, file, mine, createdAt
 
   const voiceUrl = useMemo(() => {
     if (kind !== 'voice' || !voice?.dataBase64) return null;
-    const blob = new Blob([b64ToBytes(voice.dataBase64)], { type: voice.mimeType || 'audio/webm' });
+    const safeMime = sanitizeMime(voice.mimeType || 'audio/webm', 'audio');
+    const blob = new Blob([b64ToBytes(voice.dataBase64)], { type: safeMime });
     return URL.createObjectURL(blob);
   }, [kind, voice?.dataBase64, voice?.mimeType]);
 
+  const isImageFile = kind === 'file' && SAFE_IMAGE_TYPES.has((file?.mimeType ?? '').toLowerCase());
+
   const fileUrl = useMemo(() => {
     if (kind !== 'file' || !file?.dataBase64) return null;
-    const blob = new Blob([b64ToBytes(file.dataBase64)], { type: file.mimeType || 'application/octet-stream' });
+    const safeMime = isImageFile
+      ? sanitizeMime(file.mimeType, 'image')
+      : sanitizeMime(file.mimeType || 'application/octet-stream', 'file');
+    const blob = new Blob([b64ToBytes(file.dataBase64)], { type: safeMime });
     return URL.createObjectURL(blob);
-  }, [kind, file?.dataBase64, file?.mimeType]);
-  const isSvg = (file?.mimeType ?? '').toLowerCase().includes('svg');
-  const isImageFile = kind === 'file' && (file?.mimeType ?? '').startsWith('image/') && !isSvg;
+  }, [kind, file?.dataBase64, file?.mimeType, isImageFile]);
 
   useEffect(() => {
     return () => {
@@ -108,13 +122,22 @@ export default function MessageBubble({ kind, text, voice, file, mine, createdAt
       {kind === 'file' && file && fileUrl && (
         <div className="file-message">
           {isImageFile && (
-            <a href={fileUrl} target="_blank" rel="noreferrer" className="file-preview-link">
+            <button
+              type="button"
+              className="file-preview-link"
+              onClick={() => {
+                const a = document.createElement('a');
+                a.href = fileUrl;
+                a.download = file.name;
+                a.click();
+              }}
+            >
               <img src={fileUrl} alt={file.name} className="file-image-preview" />
-            </a>
+            </button>
           )}
           <span className="file-name">{file.name}</span>
           <a href={fileUrl} download={file.name} className="file-download">
-            {isImageFile ? 'Ouvrir image' : 'Telecharger'}
+            {isImageFile ? 'Telecharger image' : 'Telecharger'}
           </a>
         </div>
       )}

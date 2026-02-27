@@ -2,6 +2,7 @@
 
 namespace App\Service;
 
+use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
 class JsonFactory
@@ -15,7 +16,7 @@ class JsonFactory
             'Access-Control-Allow-Origin' => $allowedOrigin,
             'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
             'Access-Control-Allow-Methods' => 'GET,POST,DELETE,OPTIONS',
-            'Access-Control-Allow-Credentials' => 'false',
+            'Access-Control-Allow-Credentials' => 'true',
             'Vary' => 'Origin',
             'X-Content-Type-Options' => 'nosniff',
             'X-Frame-Options' => 'DENY',
@@ -28,6 +29,22 @@ class JsonFactory
             'Cache-Control' => 'no-store, max-age=0',
             'Pragma' => 'no-cache',
         ]);
+    }
+
+    public function okWithCookie(array $data, string $token, int $ttlSeconds, int $status = 200): JsonResponse
+    {
+        $response = $this->ok($data, $status);
+        $secure = strtolower((string) (getenv('APP_ENV') ?: 'dev')) === 'prod';
+        $response->headers->setCookie(
+            Cookie::create('ghost_token')
+                ->withValue($token)
+                ->withExpires(time() + $ttlSeconds)
+                ->withPath('/')
+                ->withHttpOnly(true)
+                ->withSecure($secure)
+                ->withSameSite('strict')
+        );
+        return $response;
     }
 
     public function error(string $message, int $status = 400): JsonResponse

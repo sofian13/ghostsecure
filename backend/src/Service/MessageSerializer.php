@@ -10,12 +10,13 @@ class MessageSerializer
     {
         return [
             'id' => $message->getId(),
-            'senderId' => $message->getSender()->getId(),
+            'senderId' => null,
             'ciphertext' => $message->getCiphertext(),
             'iv' => $message->getIv(),
             'wrappedKeys' => $message->getWrappedKeys(),
             'createdAt' => $message->getCreatedAt()->format(DATE_ATOM),
             'expiresAt' => $message->getExpiresAt()?->format(DATE_ATOM),
+            'ephemeralPublicKey' => $message->getEphemeralPublicKey(),
         ];
     }
 }

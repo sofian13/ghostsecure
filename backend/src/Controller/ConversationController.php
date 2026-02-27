@@ -130,16 +130,17 @@ class ConversationController
         }
 
         $rows = $this->em->getConnection()->fetchAllAssociative(
-            'SELECT u.id, u.public_key FROM conversation_member cm
+            'SELECT u.id, u.public_key, u.ecdh_public_key FROM conversation_member cm
              INNER JOIN app_user u ON u.id = cm.user_id
              WHERE cm.conversation_id = :cid',
             ['cid' => $id]
         );
 
-        $participants = array_map(static fn (array $row) => [
+        $participants = array_map(static fn (array $row) => array_filter([
             'id' => $row['id'],
             'publicKey' => $row['public_key'],
-        ], $rows);
+            'ecdhPublicKey' => $row['ecdh_public_key'] ?? null,
+        ], static fn ($v) => $v !== null), $rows);
 
         $conversation = $this->em->getRepository(Conversation::class)->find($id);
         if (!$conversation instanceof Conversation) {
@@ -202,6 +203,10 @@ class ConversationController
         $newUser = $this->em->getRepository(User::class)->find($newUserId);
         if (!$newUser instanceof User) {
             return $this->json->error('User not found.', 404);
+        }
+
+        if (!$this->isFriend($me->getId(), $newUser->getId())) {
+            return $this->json->error('You must be friends to add a member.', 403);
         }
 
         $exists = $this->em->getConnection()->fetchOne(
@@ -371,7 +376,8 @@ class ConversationController
             $expiresAt = new \DateTimeImmutable(sprintf('+%d seconds', min($expiresInSeconds, 86400)));
         }
 
-        $message = new Message(self::uuid(), $conversation, $me, $ciphertext, $iv, $wrappedKeys, $expiresAt);
+        $ephemeralPublicKey = trim((string) ($payload['ephemeralPublicKey'] ?? ''));
+        $message = new Message(self::uuid(), $conversation, $me, $ciphertext, $iv, $wrappedKeys, $expiresAt, $ephemeralPublicKey !== '' ? $ephemeralPublicKey : null);
         $this->em->persist($message);
         $this->em->flush();
 
@@ -397,6 +403,18 @@ class ConversationController
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
     }
 
+    private function isFriend(string $userId1, string $userId2): bool
+    {
+        return (bool) $this->em->getConnection()->fetchOne(
+            "SELECT 1 FROM friend_request
+             WHERE status = 'accepted'
+               AND ((requester_id = :u1 AND target_user_id = :u2)
+                 OR (requester_id = :u2 AND target_user_id = :u1))
+             LIMIT 1",
+            ['u1' => $userId1, 'u2' => $userId2]
+        );
+    }
+
     private function createDirectConversation(User $me, array $payload)
     {
         $peerUserId = strtolower(trim((string) ($payload['peerUserId'] ?? '')));
@@ -407,6 +425,10 @@ class ConversationController
         $peer = $this->em->getRepository(User::class)->find($peerUserId);
         if (!$peer instanceof User) {
             return $this->json->error('Peer not found.', 404);
+        }
+
+        if (!$this->isFriend($me->getId(), $peer->getId())) {
+            return $this->json->error('You must be friends to start a conversation.', 403);
         }
 
         $existing = $this->em->getConnection()->fetchOne(
@@ -482,6 +504,12 @@ class ConversationController
         $users = $this->em->getRepository(User::class)->findBy(['id' => array_keys($uniqueIds)]);
         if (count($users) !== count($uniqueIds)) {
             return $this->json->error('One or more users were not found.', 404);
+        }
+
+        foreach ($users as $user) {
+            if ($user->getId() !== $me->getId() && !$this->isFriend($me->getId(), $user->getId())) {
+                return $this->json->error('You must be friends with all members.', 403);
+            }
         }
 
         $conversation = new Conversation(self::uuid(), Conversation::KIND_GROUP, $title);

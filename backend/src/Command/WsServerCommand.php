@@ -71,6 +71,31 @@ class WsServerCommand extends Command implements MessageComponentInterface
             return;
         }
 
+        // Try cookie-based auth at connection time
+        $cookieToken = $this->extractCookieToken($conn);
+        if ($cookieToken !== '') {
+            $row = $this->db->fetchAssociative(
+                'SELECT s.id, u.id as user_id
+                 FROM user_session s
+                 INNER JOIN app_user u ON u.id = s.user_id
+                 WHERE s.token_hash = :hash AND s.expires_at > NOW()
+                 LIMIT 1',
+                ['hash' => hash('sha256', $cookieToken)]
+            );
+            if ($row && isset($row['user_id'])) {
+                $this->clients->attach($conn);
+                $this->meta[$conn->resourceId] = [
+                    'userId' => (string) $row['user_id'],
+                    'tokenHash' => hash('sha256', $cookieToken),
+                    'lastAt' => (new \DateTimeImmutable('-10 seconds'))->format('Y-m-d H:i:sP'),
+                ];
+                $this->enforceConnectionLimit((string) $row['user_id'], $conn);
+                $conn->send(json_encode(['type' => 'authenticated']));
+                $this->wsLog(sprintf('AUTH id=%s user=%s via=cookie', (string) $conn->resourceId, $row['user_id']));
+                return;
+            }
+        }
+
         $this->pending->attach($conn);
     }
 
@@ -163,6 +188,22 @@ class WsServerCommand extends Command implements MessageComponentInterface
         fwrite(STDOUT, sprintf("[WS] %s\n", $message));
     }
 
+    private function extractCookieToken(ConnectionInterface $conn): string
+    {
+        $headers = $conn->httpRequest->getHeader('Cookie');
+        if (!is_array($headers) || count($headers) === 0) {
+            return '';
+        }
+        $cookieStr = $headers[0];
+        foreach (explode(';', $cookieStr) as $part) {
+            $part = trim($part);
+            if (str_starts_with($part, 'ghost_token=')) {
+                return trim(substr($part, 12));
+            }
+        }
+        return '';
+    }
+
     private function readOrigin(ConnectionInterface $conn): string
     {
         $headers = $conn->httpRequest->getHeader('Origin');
@@ -197,7 +238,7 @@ class WsServerCommand extends Command implements MessageComponentInterface
             }
 
             $rows = $this->db->fetchAllAssociative(
-                'SELECT m.id, m.conversation_id, m.ciphertext, m.iv, m.wrapped_keys, m.created_at, m.expires_at, m.sender_id
+                'SELECT m.id, m.conversation_id, m.ciphertext, m.iv, m.wrapped_keys, m.created_at, m.expires_at, m.ephemeral_public_key
                  FROM message m
                  INNER JOIN conversation_member cm ON cm.conversation_id = m.conversation_id
                  WHERE cm.user_id = :uid AND m.created_at > :last_at
@@ -224,12 +265,13 @@ class WsServerCommand extends Command implements MessageComponentInterface
                     'conversationId' => $row['conversation_id'],
                     'message' => [
                         'id' => $row['id'],
-                        'senderId' => $row['sender_id'],
+                        'senderId' => null,
                         'ciphertext' => $row['ciphertext'],
                         'iv' => $row['iv'],
                         'wrappedKeys' => $wrapped,
                         'createdAt' => (new \DateTimeImmutable((string) $row['created_at']))->format(DATE_ATOM),
                         'expiresAt' => $row['expires_at'] ? (new \DateTimeImmutable((string) $row['expires_at']))->format(DATE_ATOM) : null,
+                        'ephemeralPublicKey' => $row['ephemeral_public_key'] ?? null,
                     ],
                 ];
 

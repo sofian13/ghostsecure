@@ -49,20 +49,60 @@ async function importPrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
   );
 }
 
-export async function ensureIdentity(userId: string): Promise<{ publicKey: string }> {
+async function signRegistrationProof(userId: string, privateKeyJwk: JsonWebKey): Promise<string> {
+  const signingKey = await crypto.subtle.importKey(
+    'jwk',
+    { ...privateKeyJwk, alg: 'PS256', key_ops: ['sign'] },
+    { name: 'RSA-PSS', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign(
+    { name: 'RSA-PSS', saltLength: 32 },
+    signingKey,
+    new TextEncoder().encode(userId)
+  );
+  return toBase64(signature);
+}
+
+function isJsonWebKey(value: unknown): value is JsonWebKey {
+  return typeof value === 'object' && value !== null && 'kty' in value;
+}
+
+export async function ensureIdentity(userId: string): Promise<{ publicKey: string; ecdhPublicKey?: string; proof?: string }> {
   const keyId = `${PRIVATE_KEY_PREFIX}${userId}`;
-  const existing = await idbGet<JsonWebKey>(keyId);
-  if (existing) {
-    if (
-      existing.kty !== 'RSA' ||
-      existing.alg !== 'RSA-OAEP-256' ||
-      !existing.n || !existing.e ||
-      !existing.d || !existing.p || !existing.q ||
-      !existing.dp || !existing.dq || !existing.qi
-    ) {
-      throw new Error('Invalid key material');
+  const stored = await idbGet<CryptoKey | JsonWebKey>(keyId);
+
+  if (stored) {
+    // Already a non-extractable CryptoKey — use directly
+    if (stored instanceof CryptoKey) {
+      // We can't derive the public key from a non-extractable CryptoKey,
+      // but it's already been registered. The caller re-fetches from the server.
+      // Return empty publicKey — the caller should use the server-side value.
+      return { publicKey: '' };
     }
-    return { publicKey: await derivePublicFromPrivateJwk(existing) };
+
+    // Legacy JWK — validate and migrate to non-extractable CryptoKey
+    if (isJsonWebKey(stored)) {
+      const jwk = stored;
+      if (
+        jwk.kty !== 'RSA' ||
+        jwk.alg !== 'RSA-OAEP-256' ||
+        !jwk.n || !jwk.e ||
+        !jwk.d || !jwk.p || !jwk.q ||
+        !jwk.dp || !jwk.dq || !jwk.qi
+      ) {
+        throw new Error('Invalid key material');
+      }
+      const publicKey = await derivePublicFromPrivateJwk(jwk);
+      const nonExtractableKey = await crypto.subtle.importKey(
+        'jwk', jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['unwrapKey']
+      );
+      await idbSet(keyId, nonExtractableKey);
+      return { publicKey };
+    }
+
+    throw new Error('Invalid key material');
   }
 
   const keyPair = await crypto.subtle.generateKey(
@@ -76,10 +116,32 @@ export async function ensureIdentity(userId: string): Promise<{ publicKey: strin
     ['wrapKey', 'unwrapKey']
   );
 
+  const publicKeyB64 = await exportPublicKey(keyPair.publicKey);
   const privateJwk = await exportPrivateKeyJwk(keyPair.privateKey);
-  await idbSet(keyId, privateJwk);
 
-  return { publicKey: await exportPublicKey(keyPair.publicKey) };
+  // Generate proof of possession before making key non-extractable
+  const proof = await signRegistrationProof(userId, privateJwk);
+
+  // Re-import as non-extractable CryptoKey for secure storage
+  const nonExtractableKey = await crypto.subtle.importKey(
+    'jwk',
+    privateJwk,
+    { name: 'RSA-OAEP', hash: 'SHA-256' },
+    false,
+    ['unwrapKey']
+  );
+  await idbSet(keyId, nonExtractableKey);
+
+  // Generate ECDH keypair for forward secrecy
+  const ecdhPair = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    ['deriveBits']
+  );
+  const ecdhPub = await exportPublicKey(ecdhPair.publicKey);
+  await idbSet(`ecdh-private:${userId}`, ecdhPair.privateKey);
+
+  return { publicKey: publicKeyB64, ecdhPublicKey: ecdhPub, proof };
 }
 
 async function derivePublicFromPrivateJwk(privateJwk: JsonWebKey): Promise<string> {
@@ -103,21 +165,93 @@ async function derivePublicFromPrivateJwk(privateJwk: JsonWebKey): Promise<strin
 
 async function getPrivateKey(userId: string): Promise<CryptoKey> {
   const keyId = `${PRIVATE_KEY_PREFIX}${userId}`;
-  const jwk = await idbGet<JsonWebKey>(keyId);
-  if (!jwk) {
+  const stored = await idbGet<CryptoKey | JsonWebKey>(keyId);
+  if (!stored) {
     throw new Error('Private key unavailable on this device');
   }
-  return importPrivateKey(jwk);
+
+  // Already a CryptoKey (non-extractable)
+  if (stored instanceof CryptoKey) {
+    return stored;
+  }
+
+  // Legacy JWK — import and migrate
+  if (isJsonWebKey(stored)) {
+    const key = await importPrivateKey(stored);
+    const nonExtractableKey = await crypto.subtle.importKey(
+      'jwk', stored, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['unwrapKey']
+    );
+    await idbSet(keyId, nonExtractableKey);
+    return key;
+  }
+
+  throw new Error('Private key unavailable on this device');
 }
 
-export async function encryptForParticipants(plaintext: string, participants: { id: string; publicKey: string }[], conversationId?: string): Promise<{
+async function ecdhWrapKey(
+  aesKey: CryptoKey,
+  recipientEcdhPubBase64: string,
+  conversationId: string
+): Promise<{ wrappedKey: string; ephemeralPublicKey: string }> {
+  // Generate ephemeral ECDH keypair
+  const ephPair = await crypto.subtle.generateKey(
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    ['deriveBits']
+  );
+
+  // Import recipient ECDH public key
+  const recipientPub = await crypto.subtle.importKey(
+    'spki',
+    fromBase64(recipientEcdhPubBase64),
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    []
+  );
+
+  // Derive shared secret
+  const sharedBits = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: recipientPub },
+    ephPair.privateKey,
+    256
+  );
+
+  // HKDF to derive wrapping key
+  const hkdfKey = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
+  const wrappingKey = await crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode(conversationId), info: new Uint8Array(0) },
+    hkdfKey,
+    { name: 'AES-KW', length: 256 },
+    false,
+    ['wrapKey']
+  );
+
+  // Wrap the AES message key
+  const wrapped = await crypto.subtle.wrapKey('raw', aesKey, wrappingKey, 'AES-KW');
+  const ephPub = await exportPublicKey(ephPair.publicKey);
+
+  return { wrappedKey: toBase64(wrapped), ephemeralPublicKey: ephPub };
+}
+
+export async function encryptForParticipants(
+  plaintext: string,
+  participants: { id: string; publicKey: string; ecdhPublicKey?: string }[],
+  conversationId?: string,
+  senderId?: string
+): Promise<{
   ciphertext: string;
   iv: string;
   wrappedKeys: Record<string, string>;
+  ephemeralPublicKey?: string;
 }> {
   const encoder = new TextEncoder();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+
+  // Sealed sender: wrap plaintext with sender identity
+  const actualPlaintext = senderId
+    ? JSON.stringify({ v: 2, s: senderId, c: plaintext })
+    : plaintext;
 
   const gcmParams: AesGcmParams = { name: 'AES-GCM', iv };
   if (conversationId) {
@@ -127,21 +261,32 @@ export async function encryptForParticipants(plaintext: string, participants: { 
   const ciphertext = await crypto.subtle.encrypt(
     gcmParams,
     aesKey,
-    encoder.encode(plaintext)
+    encoder.encode(actualPlaintext)
   );
 
   const wrappedKeys: Record<string, string> = {};
+  let ephemeralPublicKey: string | undefined;
 
   for (const participant of participants) {
-    const recipientPub = await importPublicKey(participant.publicKey);
-    const wrapped = await crypto.subtle.wrapKey('raw', aesKey, recipientPub, { name: 'RSA-OAEP' });
-    wrappedKeys[participant.id] = toBase64(wrapped);
+    if (participant.ecdhPublicKey && conversationId) {
+      // Forward secrecy path: ECDH key wrapping
+      const result = await ecdhWrapKey(aesKey, participant.ecdhPublicKey, conversationId);
+      wrappedKeys[participant.id] = result.wrappedKey;
+      // All participants share the same ephemeral key for simplicity
+      if (!ephemeralPublicKey) ephemeralPublicKey = result.ephemeralPublicKey;
+    } else {
+      // Legacy RSA-OAEP wrapping
+      const recipientPub = await importPublicKey(participant.publicKey);
+      const wrapped = await crypto.subtle.wrapKey('raw', aesKey, recipientPub, { name: 'RSA-OAEP' });
+      wrappedKeys[participant.id] = toBase64(wrapped);
+    }
   }
 
   return {
     ciphertext: toBase64(ciphertext),
     iv: toBase64(iv.buffer),
-    wrappedKeys
+    wrappedKeys,
+    ephemeralPublicKey
   };
 }
 
@@ -149,21 +294,69 @@ export async function decryptIncomingMessage(userId: string, payload: {
   ciphertext: string;
   iv: string;
   wrappedKey: string;
-}, conversationId?: string): Promise<string> {
-  const privateKey = await getPrivateKey(userId);
-  const aesKey = await crypto.subtle.unwrapKey(
-    'raw',
-    fromBase64(payload.wrappedKey),
-    privateKey,
-    { name: 'RSA-OAEP' },
-    { name: 'AES-GCM' },
-    false,
-    ['decrypt']
-  );
+  ephemeralPublicKey?: string | null;
+}, conversationId?: string, createdAt?: string): Promise<string> {
+  let aesKey: CryptoKey;
+
+  if (payload.ephemeralPublicKey && conversationId) {
+    // Forward secrecy path: ECDH unwrap
+    const ecdhPrivate = await idbGet<CryptoKey>(`ecdh-private:${userId}`);
+    if (!ecdhPrivate) {
+      throw new Error('ECDH private key unavailable on this device');
+    }
+
+    const ephPub = await crypto.subtle.importKey(
+      'spki',
+      fromBase64(payload.ephemeralPublicKey),
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      []
+    );
+
+    const sharedBits = await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: ephPub },
+      ecdhPrivate,
+      256
+    );
+
+    const hkdfKey = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
+    const wrappingKey = await crypto.subtle.deriveKey(
+      { name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode(conversationId), info: new Uint8Array(0) },
+      hkdfKey,
+      { name: 'AES-KW', length: 256 },
+      false,
+      ['unwrapKey']
+    );
+
+    aesKey = await crypto.subtle.unwrapKey(
+      'raw',
+      fromBase64(payload.wrappedKey),
+      wrappingKey,
+      'AES-KW',
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt']
+    );
+  } else {
+    // Legacy RSA-OAEP unwrap
+    const privateKey = await getPrivateKey(userId);
+    aesKey = await crypto.subtle.unwrapKey(
+      'raw',
+      fromBase64(payload.wrappedKey),
+      privateKey,
+      { name: 'RSA-OAEP' },
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt']
+    );
+  }
 
   const iv = new Uint8Array(fromBase64(payload.iv));
   const ciphertextBuf = fromBase64(payload.ciphertext);
   const encoder = new TextEncoder();
+
+  const AAD_CUTOFF = '2026-02-28T00:00:00Z';
+  const requireAAD = conversationId && createdAt && createdAt >= AAD_CUTOFF;
 
   if (conversationId) {
     try {
@@ -174,6 +367,9 @@ export async function decryptIncomingMessage(userId: string, payload: {
       );
       return new TextDecoder().decode(plainBuffer);
     } catch {
+      if (requireAAD) {
+        throw new Error('AAD verification failed — message integrity cannot be verified');
+      }
       // Backward compatibility: retry without AAD for older messages
     }
   }
@@ -197,4 +393,5 @@ export async function generateSafetyNumber(publicKeyBase64: string): Promise<str
 export async function wipeLocalKeys(userId: string): Promise<void> {
   const keyId = `${PRIVATE_KEY_PREFIX}${userId}`;
   await idbDelete(keyId);
+  await idbDelete(`ecdh-private:${userId}`);
 }

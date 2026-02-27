@@ -7,12 +7,13 @@ import type { Session } from '@/types';
 type MessageRow = {
   id: string;
   conversation_id: string;
-  sender_id: string;
+  sender_id: string | null;
   ciphertext: string;
   iv: string;
   wrapped_keys: Record<string, string> | null;
   created_at: string;
   expires_at: string | null;
+  ephemeral_public_key: string | null;
 };
 
 export function useRealtime(session: Session | null, onMessage: (payload: unknown) => void): void {
@@ -40,12 +41,13 @@ export function useRealtime(session: Session | null, onMessage: (payload: unknow
             conversationId: row.conversation_id,
             message: {
               id: row.id,
-              senderId: row.sender_id,
+              senderId: row.sender_id ?? null,
               ciphertext: row.ciphertext,
               iv: row.iv,
               wrappedKeys,
               createdAt: row.created_at,
               expiresAt: row.expires_at,
+              ephemeralPublicKey: row.ephemeral_public_key ?? null,
             },
           });
         }
