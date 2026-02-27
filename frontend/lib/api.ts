@@ -178,9 +178,10 @@ export async function fetchConversationDetail(session: Session, conversationId: 
   return apiRequest<ConversationDetail>(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: 'GET' }, session);
 }
 
-export async function fetchMessages(session: Session, conversationId: string): Promise<EncryptedMessage[]> {
+export async function fetchMessages(session: Session, conversationId: string, limit?: number): Promise<EncryptedMessage[]> {
+  const query = limit ? `?limit=${limit}` : '';
   const rows = await apiRequest<EncryptedMessage[]>(
-    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages${query}`,
     { method: 'GET' },
     session
   );

@@ -56,7 +56,7 @@ export default function ChatListPage() {
     const resolved = await Promise.all(
       rows.map(async (conv) => {
         try {
-          const encrypted = await fetchMessages(s, conv.id);
+          const encrypted = await fetchMessages(s, conv.id, 1);
           const last = encrypted[encrypted.length - 1];
           if (!last) {
             return [conv.id, { text: 'Nouveau chat securise', at: conv.updatedAt }] as const;
@@ -91,7 +91,7 @@ export default function ChatListPage() {
     if (!session) return;
     const id = window.setInterval(() => {
       void loadConversationsAndPreview(session).catch(() => null);
-    }, 6000);
+    }, 20000);
     return () => window.clearInterval(id);
   }, [session]);
 
@@ -369,7 +369,10 @@ function formatHour(raw: string): string {
 function SettingsGearIcon() {
   return (
     <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m12 2 2.2 1.2 2.5-.3 1.3 2.1 2.3 1 .1 2.5 1.6 2-1 2.3 1 2.3-1.6 2-.1 2.5-2.3 1-1.3 2.1-2.5-.3L12 22l-2.2-1.2-2.5.3-1.3-2.1-2.3-1-.1-2.5-1.6-2 1-2.3-1-2.3 1.6-2 .1-2.5 2.3-1 1.3-2.1 2.5.3L12 2Zm0 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" />
+      <path d="M3 6h10v2H3V6Zm14 0h4v2h-4V6ZM3 11h4v2H3v-2Zm7 0h11v2H10v-2ZM3 16h10v2H3v-2Zm14 0h4v2h-4v-2Z" />
+      <circle cx="15" cy="7" r="2" />
+      <circle cx="8.5" cy="12" r="2" />
+      <circle cx="15" cy="17" r="2" />
     </svg>
   );
 }

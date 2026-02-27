@@ -36,6 +36,7 @@ export default function ConversationPage() {
   const [draftVoiceMime, setDraftVoiceMime] = useState<string>('audio/webm');
   const [draftVoiceDurationMs, setDraftVoiceDurationMs] = useState(0);
 
+  const dismissedCallInvitesRef = useRef<Set<string>>(new Set());
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordStreamRef = useRef<MediaStream | null>(null);
   const recordChunksRef = useRef<Blob[]>([]);
@@ -109,18 +110,22 @@ export default function ConversationPage() {
       .channel(`call-inbox:${me}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'call_invite' }, ({ new: row }) => {
         const frame = row as {
+          id?: string;
           status?: string;
           from_user_id?: string;
           target_user_id?: string;
         };
         const target = (frame.target_user_id ?? '').trim().toLowerCase();
         const from = (frame.from_user_id ?? '').trim().toLowerCase();
+        const inviteId = frame.id ?? '';
         if (!from || target !== me) return;
         if (frame.status === 'pending') {
+          if (dismissedCallInvitesRef.current.has(inviteId)) return;
           setIncomingCallFrom(from);
           setStatus('Appel entrant');
         }
-        if (frame.status === 'rejected' || frame.status === 'ended') {
+        if (frame.status === 'rejected' || frame.status === 'ended' || frame.status === 'accepted') {
+          if (inviteId) dismissedCallInvitesRef.current.add(inviteId);
           setIncomingCallFrom(null);
           setStatus('Vu recemment');
         }
@@ -413,7 +418,10 @@ export default function ConversationPage() {
             <button
               type="button"
               className="ghost-primary"
-              onClick={() => router.push(`/call?target=${encodeURIComponent(incomingCallFrom)}&autocall=0`)}
+              onClick={() => {
+                setIncomingCallFrom(null);
+                router.push(`/call?target=${encodeURIComponent(incomingCallFrom)}&autocall=0`);
+              }}
             >
               Repondre
             </button>
