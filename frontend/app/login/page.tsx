@@ -68,7 +68,12 @@ export default function LoginPage() {
   return (
     <main className="auth-screen">
       <section className="glass-card auth-card-v2">
-        <p className="kicker">Ghost Secure</p>
+        <div className="auth-brand">
+          <div className="brand-icon">
+            <ShieldIcon />
+          </div>
+          <p className="kicker">Ghost Secure</p>
+        </div>
         <h1>Connexion securisee</h1>
         <p className="muted-text">Messagerie E2EE avec session token et transport temps reel.</p>
 
@@ -116,7 +121,9 @@ export default function LoginPage() {
 
           <p className="user-id">ID normalise: {userId || '...'}</p>
           <button type="submit" className="glass-btn primary" disabled={loading}>
-            {loading ? 'Traitement...' : mode === 'register' ? "Creer le compte" : 'Se connecter'}
+            {loading ? (
+              <span className="btn-content"><span className="spinner" /> Traitement</span>
+            ) : mode === 'register' ? "Creer le compte" : 'Se connecter'}
           </button>
         </form>
 
@@ -134,4 +141,12 @@ function normalizeHandle(value: string): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 24);
+}
+
+function ShieldIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2l7.5 3.5v5c0 5.25-3.19 10.15-7.5 11.5C7.69 20.65 4.5 15.75 4.5 10.5v-5L12 2Zm0 2.2L6.5 7v3.5c0 4.25 2.58 8.22 5.5 9.45 2.92-1.23 5.5-5.2 5.5-9.45V7L12 4.2Z" />
+    </svg>
+  );
 }

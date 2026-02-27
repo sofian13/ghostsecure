@@ -342,7 +342,7 @@ export default function ConversationPage() {
       <main className="mobile-screen mobile-conversation">
         <header className="conversation-header">
           <button type="button" className="icon-btn" onClick={() => router.push('/chat')} aria-label="Retour">
-            {'<'}
+            <BackArrowIcon />
           </button>
           <div className="chat-avatar small" aria-hidden="true">{peerId.slice(0, 1).toUpperCase()}</div>
           <div className="conversation-head-copy">
@@ -359,7 +359,7 @@ export default function ConversationPage() {
             <PhoneIcon />
           </button>
           <button type="button" className="icon-btn" onClick={() => router.push('/settings')} aria-label="Options">
-            ...
+            <MoreDotsIcon />
           </button>
         </header>
 
@@ -458,7 +458,7 @@ export default function ConversationPage() {
             aria-label="Joindre"
             onClick={() => fileInputRef.current?.click()}
           >
-            +
+            <AttachmentIcon />
           </button>
           <input ref={fileInputRef} type="file" className="hidden-file-input" onChange={onPickAttachment} />
           <input
@@ -471,7 +471,12 @@ export default function ConversationPage() {
           {rightAction}
         </form>
 
-        {recording && <p className="recording-state">Enregistrement {Math.ceil(recordingMs / 1000)}s</p>}
+        {recording && (
+          <div className="recording-indicator">
+            <span className="recording-dot" />
+            <span>Enregistrement {Math.ceil(recordingMs / 1000)}s</span>
+          </div>
+        )}
         {error && <p className="error-text">{error}</p>}
 
         <MobileTabs />
@@ -496,6 +501,30 @@ function sortAndDedupe(items: DecryptedMessage[]): DecryptedMessage[] {
     if (byCreatedAt !== 0) return byCreatedAt;
     return a.id.localeCompare(b.id);
   });
+}
+
+function BackArrowIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M15.7 4.3a1 1 0 0 1 0 1.4L9.4 12l6.3 6.3a1 1 0 0 1-1.4 1.4l-7-7a1 1 0 0 1 0-1.4l7-7a1 1 0 0 1 1.4 0Z" />
+    </svg>
+  );
+}
+
+function MoreDotsIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4Zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4Zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z" />
+    </svg>
+  );
+}
+
+function AttachmentIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12.5 3a5.5 5.5 0 0 1 5.5 5.5v8a3.5 3.5 0 1 1-7 0v-7a2 2 0 1 1 4 0v6.5a1 1 0 1 1-2 0V9.5a0 0 0 0 0 0 0v6.5a1.5 1.5 0 0 0 3 0v-7.5A3.5 3.5 0 0 0 9 8.5v8a5.5 5.5 0 1 0 11 0v-8A5.5 5.5 0 0 0 12.5 3Z" />
+    </svg>
+  );
 }
 
 function MicIcon() {

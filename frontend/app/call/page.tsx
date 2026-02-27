@@ -77,6 +77,14 @@ function createDistortionCurve(amount: number): Float32Array {
   return curve;
 }
 
+const VOICE_PRESETS: { value: VoicePreset; label: string; emoji: string }[] = [
+  { value: 'normal', label: 'Normal', emoji: '\uD83C\uDFA4' },
+  { value: 'ghost', label: 'Ghost', emoji: '\uD83D\uDC7B' },
+  { value: 'robot', label: 'Robot', emoji: '\uD83E\uDD16' },
+  { value: 'deep', label: 'Deep', emoji: '\uD83C\uDF0A' },
+  { value: 'vader', label: 'Vader', emoji: '\u2694\uFE0F' },
+];
+
 const ICE_SERVERS = resolveIceServers();
 const LOW_BANDWIDTH_AUDIO_MAX_BITRATE = 18000;
 const ICE_PARTIAL_GATHERING_CALLER_MS = 2600;
@@ -842,16 +850,22 @@ export default function CallPage() {
             />
           </label>
 
-          <label className="field">
+          <div className="field">
             <span>Voix</span>
-            <select className="mobile-input" value={voicePreset} onChange={(e) => setVoicePreset(e.target.value as VoicePreset)}>
-              <option value="normal">Normal</option>
-              <option value="ghost">Ghost</option>
-              <option value="robot">Robot</option>
-              <option value="deep">Deep</option>
-              <option value="vader">Vader</option>
-            </select>
-          </label>
+            <div className="voice-presets">
+              {VOICE_PRESETS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  className={`voice-preset-card ${voicePreset === p.value ? 'active' : ''}`}
+                  onClick={() => setVoicePreset(p.value)}
+                >
+                  <span className="preset-emoji">{p.emoji}</span>
+                  <span className="preset-label">{p.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="row">
             <button className="ghost-primary" type="button" onClick={startCall}>Appeler</button>

@@ -66,7 +66,6 @@ export default function MessageBubble({ kind, text, voice, file, mine, createdAt
   }, [voiceUrl, fileUrl]);
 
   const time = new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const statusLabel = mine ? (status === 'read' ? 'Lu' : status === 'received' ? 'Recu' : 'Envoye') : '';
 
   if (isExpired) {
     return <div className={`message-bubble ${mine ? 'mine' : 'peer'}`}>[message supprime]</div>;
@@ -120,9 +119,31 @@ export default function MessageBubble({ kind, text, voice, file, mine, createdAt
       )}
       <div className="message-meta">
         <span>{time}</span>
-        {statusLabel && <span className="message-status">{statusLabel}</span>}
+        {mine && <StatusIcon status={status} />}
       </div>
     </div>
+  );
+}
+
+function StatusIcon({ status }: { status: 'sent' | 'received' | 'read' }) {
+  if (status === 'read') return <DoubleCheckIcon className="message-status-icon read" />;
+  if (status === 'received') return <DoubleCheckIcon className="message-status-icon" />;
+  return <CheckIcon className="message-status-icon" />;
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M13.3 4.3a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4 0l-2.6-2.6a1 1 0 1 1 1.4-1.4L6.6 9.6l5.3-5.3a1 1 0 0 1 1.4 0Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function DoubleCheckIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M11.3 4.3a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.4 0L1.3 9.1a1 1 0 1 1 1.4-1.4l2.2 2.2 5.3-5.3a1 1 0 0 1 1.4 0Zm3 0a1 1 0 0 1 0 1.4l-6 6a1 1 0 0 1-1.2.2l.7-.7 5.3-5.3a1 1 0 0 1 1.4 0Z" fill="currentColor" />
+    </svg>
   );
 }
 

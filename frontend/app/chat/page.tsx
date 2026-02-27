@@ -184,22 +184,25 @@ export default function ChatListPage() {
             <p className="muted-text">Chats chiffres</p>
           </div>
           <button type="button" className="icon-btn" onClick={() => router.push('/settings')} aria-label="Parametres">
-            P
+            <SettingsGearIcon />
           </button>
         </header>
 
         <div className="sticky-search">
-          <input
-            className="mobile-input"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher"
-          />
+          <div className="search-wrap">
+            <SearchIcon />
+            <input
+              className="mobile-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher"
+            />
+          </div>
         </div>
 
         {friendRequests.length > 0 && (
           <section className="inline-card">
-            <p className="section-title">Demandes d'ami</p>
+            <p className="section-title">Demandes d&apos;ami</p>
             <div className="request-list">
               {friendRequests.map((request) => (
                 <div key={request.id} className="request-row">
@@ -227,14 +230,18 @@ export default function ChatListPage() {
 
           {!loading && filteredConversations.length === 0 && (
             <div className="empty-state">
+              <div className="empty-state-icon">
+                <ChatEmptyIcon />
+              </div>
               <p>Aucune conversation</p>
-              <p className="muted-text">Appuyez sur Nouveau chat pour commencer</p>
+              <p className="muted-text">Appuyez sur + pour commencer</p>
             </div>
           )}
 
           {!loading &&
             filteredConversations.map((conv) => {
               const preview = previews[conv.id];
+              const isGroup = conv.kind === 'group';
               return (
                 <button
                   key={conv.id}
@@ -242,14 +249,18 @@ export default function ChatListPage() {
                   className="chat-row"
                   onClick={() => router.push(`/chat/${encodeURIComponent(conv.id)}`)}
                 >
-                  <div className="chat-avatar" aria-hidden="true">{conv.peerId.slice(0, 1).toUpperCase()}</div>
+                  {isGroup ? (
+                    <div className="chat-avatar group-avatar" aria-hidden="true"><GroupIcon /></div>
+                  ) : (
+                    <div className="chat-avatar" aria-hidden="true">{conv.peerId.slice(0, 1).toUpperCase()}</div>
+                  )}
                   <div className="chat-content">
                     <div className="chat-topline">
-                      <strong>{conv.kind === 'group' ? (conv.title ?? 'Groupe') : conv.peerId}</strong>
+                      <strong>{isGroup ? (conv.title ?? 'Groupe') : conv.peerId}</strong>
                       <span>{formatHour(preview?.at ?? conv.updatedAt)}</span>
                     </div>
                     <div className="chat-bottomline">
-                      <p>{conv.kind === 'group' ? `Groupe - ${conv.memberCount} membres` : preview?.text ?? 'Message chiffre'}</p>
+                      <p>{isGroup ? `Groupe - ${conv.memberCount} membres` : preview?.text ?? 'Message chiffre'}</p>
                     </div>
                   </div>
                 </button>
@@ -258,7 +269,7 @@ export default function ChatListPage() {
         </section>
 
         <button type="button" className="fab" onClick={() => setSheetOpen(true)} aria-label="Nouveau chat">
-          +
+          <PlusIcon />
         </button>
 
         {sheetOpen && (
@@ -327,8 +338,8 @@ export default function ChatListPage() {
 
         {(friendStatus || error) && (
           <div className="toast-zone">
-            {friendStatus && <p className="ok-text">{friendStatus}</p>}
-            {error && <p className="error-text">{error}</p>}
+            {friendStatus && <div className="toast toast-ok"><p className="ok-text">{friendStatus}</p></div>}
+            {error && <div className="toast toast-error"><p className="error-text">{error}</p></div>}
           </div>
         )}
 
@@ -353,4 +364,44 @@ function formatHour(raw: string): string {
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function SettingsGearIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m12 2 2.2 1.2 2.5-.3 1.3 2.1 2.3 1 .1 2.5 1.6 2-1 2.3 1 2.3-1.6 2-.1 2.5-2.3 1-1.3 2.1-2.5-.3L12 22l-2.2-1.2-2.5.3-1.3-2.1-2.3-1-.1-2.5-1.6-2 1-2.3-1-2.3 1.6-2 .1-2.5 2.3-1 1.3-2.1 2.5.3L12 2Zm0 6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg className="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M10.5 3a7.5 7.5 0 0 1 5.95 12.04l4.25 4.26a1 1 0 0 1-1.4 1.4l-4.26-4.25A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1Z" />
+    </svg>
+  );
+}
+
+function GroupIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm-6 3a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm12 0a3 3 0 1 1 0 6 3 3 0 0 1 0-6ZM4 18c0-2 2-3.5 5-3.8a6.3 6.3 0 0 0-1.8 3.4c-.1.5-.2.9-.2 1.4H2.5a.5.5 0 0 1-.5-.5V18Zm16 0v.5a.5.5 0 0 1-.5.5H17c0-.5-.1-1-.2-1.4a6.3 6.3 0 0 0-1.8-3.4c3 .3 5 1.8 5 3.8Zm-8-3c3 0 5 1.5 5 3.5v.5a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1v-.5c0-2 2-3.5 5-3.5Z" />
+    </svg>
+  );
+}
+
+function ChatEmptyIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v7A2.5 2.5 0 0 1 17.5 15H9l-4.2 3.4c-.33.27-.8.03-.8-.39V5.5Z" />
+    </svg>
+  );
 }

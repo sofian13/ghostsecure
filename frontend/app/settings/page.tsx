@@ -40,7 +40,7 @@ export default function SettingsPage() {
     window.localStorage.setItem('ghost_theme', next);
   };
 
-  if (!userId) return <main className="centered">Loading...</main>;
+  if (!userId) return <main className="centered">Chargement...</main>;
 
   const saveProfile = () => {
     const name = displayName.trim().slice(0, 32) || userId;
@@ -53,6 +53,13 @@ export default function SettingsPage() {
     window.setTimeout(() => setSaved(null), 2000);
   };
 
+  const securityFeatures = [
+    'Chiffrement de bout en bout',
+    'Masquage auto si perte de focus',
+    'Blocage copier/coller et drag-drop',
+    'Session temporaire navigateur',
+  ];
+
   return (
     <SecurityShell userId={userId}>
       <main className="mobile-screen settings-mobile">
@@ -64,9 +71,17 @@ export default function SettingsPage() {
         </header>
 
         <section className="inline-card">
-          <p className="section-title">Profil</p>
+          <div className="profile-header">
+            <div className="settings-avatar" aria-hidden="true">
+              {userId.slice(0, 1).toUpperCase()}
+            </div>
+            <div>
+              <strong>{displayName || userId}</strong>
+              <p className="muted-text">@{userId}</p>
+            </div>
+          </div>
           <label className="field">
-            <span>Nom affiché</span>
+            <span>Nom affiche</span>
             <input className="mobile-input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           </label>
           <label className="field">
@@ -83,21 +98,29 @@ export default function SettingsPage() {
 
         <section className="inline-card">
           <p className="section-title">Affichage</p>
-          <div className="row">
-            <button type="button" className="ghost-primary" onClick={onSwitchTheme}>
-              Basculer {theme === 'dark' ? 'clair' : 'sombre'}
-            </button>
+          <div className="settings-row">
+            <div className="settings-row-left">
+              <strong>Theme {theme === 'dark' ? 'sombre' : 'clair'}</strong>
+              <span>Basculer entre clair et sombre</span>
+            </div>
+            <button
+              type="button"
+              className={`toggle-switch ${theme === 'light' ? 'on' : ''}`}
+              onClick={onSwitchTheme}
+              aria-label={`Basculer en mode ${theme === 'dark' ? 'clair' : 'sombre'}`}
+            />
           </div>
         </section>
 
         <section className="inline-card">
           <p className="section-title">Securite active</p>
-          <ul className="security-list">
-            <li>Chiffrement de bout en bout</li>
-            <li>Masquage auto si perte de focus</li>
-            <li>Blocage copier/coller et drag-drop</li>
-            <li>Session temporaire navigateur</li>
-          </ul>
+          {securityFeatures.map((feature) => (
+            <div key={feature} className="security-feature">
+              <span className="security-feature-dot" />
+              <span className="security-feature-text">{feature}</span>
+              <span className="security-feature-badge">Actif</span>
+            </div>
+          ))}
         </section>
 
         <section className="inline-card">
