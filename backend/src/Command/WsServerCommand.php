@@ -148,6 +148,7 @@ class WsServerCommand extends Command implements MessageComponentInterface
         $this->clients->attach($conn);
         $this->meta[$conn->resourceId] = [
             'userId' => (string) $row['user_id'],
+            'tokenHash' => hash('sha256', $token),
             'lastAt' => (new \DateTimeImmutable('-10 seconds'))->format('Y-m-d H:i:sP'),
         ];
 
@@ -319,8 +320,8 @@ class WsServerCommand extends Command implements MessageComponentInterface
             }
 
             $valid = $this->db->fetchOne(
-                'SELECT 1 FROM user_session WHERE user_id = :uid AND expires_at > NOW() LIMIT 1',
-                ['uid' => $meta['userId']]
+                'SELECT 1 FROM user_session WHERE token_hash = :hash AND expires_at > NOW() LIMIT 1',
+                ['hash' => $meta['tokenHash'] ?? '']
             );
             if (!$valid) {
                 $this->wsLog(sprintf('CLOSE id=%s reason=session_expired user=%s', (string) $client->resourceId, $meta['userId']));

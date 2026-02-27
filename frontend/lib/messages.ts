@@ -21,7 +21,7 @@ export type DecryptedMessage = {
   expiresAt: string | null;
 };
 
-export async function decryptForUser(userId: string, message: EncryptedMessage): Promise<DecryptedMessage | null> {
+export async function decryptForUser(userId: string, message: EncryptedMessage, conversationId?: string): Promise<DecryptedMessage | null> {
   const normalizedUserId = userId.trim().toLowerCase();
   const wrappedKey = message.wrappedKeys[userId]
     ?? message.wrappedKeys[normalizedUserId]
@@ -33,7 +33,7 @@ export async function decryptForUser(userId: string, message: EncryptedMessage):
       ciphertext: message.ciphertext,
       iv: message.iv,
       wrappedKey,
-    });
+    }, conversationId);
 
     let voice: DecryptedMessage['voice'];
     let file: DecryptedMessage['file'];

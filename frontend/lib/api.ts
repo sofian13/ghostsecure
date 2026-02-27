@@ -154,6 +154,15 @@ export async function logoutUser(session: Session): Promise<void> {
   }
 }
 
+export async function logoutAllDevices(session: Session): Promise<number> {
+  const data = await apiRequest<{ ok: boolean; sessionsRevoked: number }>(
+    '/api/auth/logout-all',
+    { method: 'POST' },
+    session
+  );
+  return data.sessionsRevoked;
+}
+
 export async function fetchConversations(session: Session): Promise<Conversation[]> {
   return apiRequest<Conversation[]>('/api/conversations', { method: 'GET' }, session);
 }

@@ -6,7 +6,7 @@ import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
 import { getSession } from '@/lib/session';
 import { addGroupMember, fetchConversationDetail, fetchMessages, leaveGroupConversation, sendMessage } from '@/lib/api';
-import { encryptForParticipants } from '@/lib/crypto';
+import { encryptForParticipants, generateSafetyNumber } from '@/lib/crypto';
 import { decryptForUser, type DecryptedMessage } from '@/lib/messages';
 import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
@@ -34,6 +34,8 @@ export default function ConversationPage() {
   const [draftVoiceBlob, setDraftVoiceBlob] = useState<Blob | null>(null);
   const [draftVoiceMime, setDraftVoiceMime] = useState<string>('audio/webm');
   const [draftVoiceDurationMs, setDraftVoiceDurationMs] = useState(0);
+  const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
+  const [showSafetyNumber, setShowSafetyNumber] = useState(false);
 
   const dismissedCallInvitesRef = useRef<Set<string>>(new Set());
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -66,7 +68,7 @@ export default function ConversationPage() {
 
   const loadMessages = async (s: Session) => {
     const encrypted = await fetchMessages(s, conversationId);
-    const decrypted = await Promise.all(encrypted.map((m) => decryptForUser(s.userId, m)));
+    const decrypted = await Promise.all(encrypted.map((m) => decryptForUser(s.userId, m, conversationId)));
     setMessages(sortAndDedupe(decrypted.filter((m): m is DecryptedMessage => Boolean(m))));
   };
 
@@ -140,7 +142,7 @@ export default function ConversationPage() {
     const event = payload as { type?: string; conversationId?: string; message?: EncryptedMessage };
     if (!session) return;
     if (event.type !== 'new_message' || event.conversationId !== conversationId || !event.message) return;
-    const decrypted = await decryptForUser(session.userId, event.message);
+    const decrypted = await decryptForUser(session.userId, event.message, conversationId);
     if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
   });
 
@@ -152,10 +154,11 @@ export default function ConversationPage() {
       const detail = await fetchConversationDetail(session, conversationId);
       const encrypted = await encryptForParticipants(
         input.trim(),
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey })),
+        conversationId
       );
       const sent = await sendMessage(session, conversationId, { ...encrypted });
-      const decrypted = await decryptForUser(session.userId, sent);
+      const decrypted = await decryptForUser(session.userId, sent, conversationId);
       if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
       setInput('');
     } catch (err) {
@@ -234,10 +237,11 @@ export default function ConversationPage() {
       });
       const encrypted = await encryptForParticipants(
         payload,
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey })),
+        conversationId
       );
       const sent = await sendMessage(session, conversationId, { ...encrypted });
-      const decrypted = await decryptForUser(session.userId, sent);
+      const decrypted = await decryptForUser(session.userId, sent, conversationId);
       if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
       discardDraftVoice();
     } catch {
@@ -269,10 +273,11 @@ export default function ConversationPage() {
       const detail = await fetchConversationDetail(session, conversationId);
       const encrypted = await encryptForParticipants(
         payload,
-        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey }))
+        detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey })),
+        conversationId
       );
       const sent = await sendMessage(session, conversationId, { ...encrypted });
-      const decrypted = await decryptForUser(session.userId, sent);
+      const decrypted = await decryptForUser(session.userId, sent, conversationId);
       if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
     } catch {
       setError("Erreur envoi piece jointe");
@@ -379,11 +384,43 @@ export default function ConversationPage() {
                 <PhoneIcon />
               </button>
             )}
-            <button type="button" className="icon-btn" aria-label="Chiffrement">
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Chiffrement"
+              onClick={async () => {
+                if (!session) return;
+                try {
+                  const detail = await fetchConversationDetail(session, conversationId);
+                  const peer = detail.participants.find((p) => p.id !== session.userId);
+                  if (peer) {
+                    const fingerprint = await generateSafetyNumber(peer.publicKey);
+                    setSafetyNumber(fingerprint);
+                  } else {
+                    setSafetyNumber('Aucune cle publique disponible');
+                  }
+                  setShowSafetyNumber(true);
+                } catch {
+                  setSafetyNumber('Erreur de verification');
+                  setShowSafetyNumber(true);
+                }
+              }}
+            >
               <LockIcon />
             </button>
           </div>
         </header>
+
+        {showSafetyNumber && safetyNumber && (
+          <div className="safety-number-overlay" onClick={() => setShowSafetyNumber(false)}>
+            <div className="safety-number-dialog" onClick={(e) => e.stopPropagation()}>
+              <p className="section-title">Numero de securite</p>
+              <p className="muted-text">Comparez ce numero avec votre contact pour verifier le chiffrement.</p>
+              <code className="safety-number-code">{safetyNumber}</code>
+              <button type="button" className="ghost-secondary" onClick={() => setShowSafetyNumber(false)}>Fermer</button>
+            </div>
+          </div>
+        )}
 
         {conversationKind === 'group' && (
           <div className="conv-group-bar">

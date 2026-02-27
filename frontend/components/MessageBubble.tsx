@@ -56,7 +56,8 @@ export default function MessageBubble({ kind, text, voice, file, mine, createdAt
     const blob = new Blob([b64ToBytes(file.dataBase64)], { type: file.mimeType || 'application/octet-stream' });
     return URL.createObjectURL(blob);
   }, [kind, file?.dataBase64, file?.mimeType]);
-  const isImageFile = kind === 'file' && (file?.mimeType ?? '').startsWith('image/');
+  const isSvg = (file?.mimeType ?? '').toLowerCase().includes('svg');
+  const isImageFile = kind === 'file' && (file?.mimeType ?? '').startsWith('image/') && !isSvg;
 
   useEffect(() => {
     return () => {

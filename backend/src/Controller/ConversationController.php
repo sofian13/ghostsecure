@@ -271,6 +271,11 @@ class ConversationController
         if (!$me instanceof User) {
             return $this->json->error('Unauthorized.', 401);
         }
+
+        if (!$this->throttle->isAllowed('fetch_messages', sprintf('user:%s', $me->getId()))) {
+            return $this->json->error('Too many requests. Try again later.', 429);
+        }
+
         if (!$this->hasAccess($me->getId(), $id)) {
             return $this->json->error('Forbidden.', 403);
         }
@@ -349,6 +354,16 @@ class ConversationController
         $conversation = $this->em->getRepository(Conversation::class)->find($id);
         if (!$conversation instanceof Conversation) {
             return $this->json->error('Conversation not found.', 404);
+        }
+
+        $memberIds = $this->em->getConnection()->fetchFirstColumn(
+            'SELECT user_id FROM conversation_member WHERE conversation_id = :cid',
+            ['cid' => $id]
+        );
+        foreach (array_keys($wrappedKeys) as $keyUserId) {
+            if (!in_array(strtolower(trim((string) $keyUserId)), $memberIds, true)) {
+                return $this->json->error('wrappedKeys contains non-member user IDs.', 422);
+            }
         }
 
         $expiresAt = null;

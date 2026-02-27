@@ -1,4 +1,4 @@
-import { idbGet, idbSet } from '@/lib/idb';
+import { idbGet, idbSet, idbDelete } from '@/lib/idb';
 
 const PRIVATE_KEY_PREFIX = 'private-key:';
 
@@ -110,7 +110,7 @@ async function getPrivateKey(userId: string): Promise<CryptoKey> {
   return importPrivateKey(jwk);
 }
 
-export async function encryptForParticipants(plaintext: string, participants: { id: string; publicKey: string }[]): Promise<{
+export async function encryptForParticipants(plaintext: string, participants: { id: string; publicKey: string }[], conversationId?: string): Promise<{
   ciphertext: string;
   iv: string;
   wrappedKeys: Record<string, string>;
@@ -119,8 +119,13 @@ export async function encryptForParticipants(plaintext: string, participants: { 
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
 
+  const gcmParams: AesGcmParams = { name: 'AES-GCM', iv };
+  if (conversationId) {
+    gcmParams.additionalData = encoder.encode(conversationId);
+  }
+
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    gcmParams,
     aesKey,
     encoder.encode(plaintext)
   );
@@ -144,7 +149,7 @@ export async function decryptIncomingMessage(userId: string, payload: {
   ciphertext: string;
   iv: string;
   wrappedKey: string;
-}): Promise<string> {
+}, conversationId?: string): Promise<string> {
   const privateKey = await getPrivateKey(userId);
   const aesKey = await crypto.subtle.unwrapKey(
     'raw',
@@ -155,11 +160,41 @@ export async function decryptIncomingMessage(userId: string, payload: {
     false,
     ['decrypt']
   );
-  const plainBuffer = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: new Uint8Array(fromBase64(payload.iv)) },
-    aesKey,
-    fromBase64(payload.ciphertext)
-  );
 
+  const iv = new Uint8Array(fromBase64(payload.iv));
+  const ciphertextBuf = fromBase64(payload.ciphertext);
+  const encoder = new TextEncoder();
+
+  if (conversationId) {
+    try {
+      const plainBuffer = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv, additionalData: encoder.encode(conversationId) },
+        aesKey,
+        ciphertextBuf
+      );
+      return new TextDecoder().decode(plainBuffer);
+    } catch {
+      // Backward compatibility: retry without AAD for older messages
+    }
+  }
+
+  const plainBuffer = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    aesKey,
+    ciphertextBuf
+  );
   return new TextDecoder().decode(plainBuffer);
+}
+
+export async function generateSafetyNumber(publicKeyBase64: string): Promise<string> {
+  const spki = fromBase64(publicKeyBase64);
+  const hash = await crypto.subtle.digest('SHA-256', spki);
+  const bytes = new Uint8Array(hash);
+  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hex.match(/.{1,8}/g)?.join(' ') ?? hex;
+}
+
+export async function wipeLocalKeys(userId: string): Promise<void> {
+  const keyId = `${PRIVATE_KEY_PREFIX}${userId}`;
+  await idbDelete(keyId);
 }

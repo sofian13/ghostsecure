@@ -61,7 +61,7 @@ export default function ChatListPage() {
           if (!last) {
             return [conv.id, { text: 'Nouveau chat securise', at: conv.updatedAt }] as const;
           }
-          const dec = await decryptForUser(s.userId, last);
+          const dec = await decryptForUser(s.userId, last, conv.id);
           return [conv.id, { text: previewLabel(dec), at: last.createdAt }] as const;
         } catch {
           return [conv.id, { text: 'Message chiffre', at: conv.updatedAt }] as const;

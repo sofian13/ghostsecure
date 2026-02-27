@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
-import { logoutUser } from '@/lib/api';
+import { logoutUser, logoutAllDevices } from '@/lib/api';
 import { clearSession, getSession } from '@/lib/session';
+import { wipeLocalKeys } from '@/lib/crypto';
 
 type ThemeMode = 'dark' | 'light';
 
@@ -131,13 +132,56 @@ export default function SettingsPage() {
             onClick={async () => {
               const session = getSession();
               if (session) await logoutUser(session);
+              if (userId) await wipeLocalKeys(userId);
               clearSession();
               window.localStorage.removeItem('ghost_profile_name');
               window.localStorage.removeItem('ghost_profile_status');
               router.replace('/login');
             }}
           >
-            Logout secure
+            Deconnexion
+          </button>
+          <button
+            className="ghost-secondary"
+            type="button"
+            style={{ marginTop: '0.5rem' }}
+            onClick={async () => {
+              const session = getSession();
+              if (!session) return;
+              const ok = window.confirm('Deconnecter tous les appareils ? Vous devrez vous reconnecter partout.');
+              if (!ok) return;
+              try {
+                const count = await logoutAllDevices(session);
+                if (userId) await wipeLocalKeys(userId);
+                clearSession();
+                window.localStorage.removeItem('ghost_profile_name');
+                window.localStorage.removeItem('ghost_profile_status');
+                setSaved(`${count} session(s) revoquee(s)`);
+                window.setTimeout(() => router.replace('/login'), 1500);
+              } catch {
+                setSaved('Erreur lors de la deconnexion');
+              }
+            }}
+          >
+            Deconnecter tous les appareils
+          </button>
+          <button
+            className="ghost-secondary"
+            type="button"
+            style={{ marginTop: '0.5rem', color: 'var(--danger, #e53e3e)' }}
+            onClick={async () => {
+              const ok = window.confirm('Effacer toutes les cles de cet appareil ? Vous ne pourrez plus dechiffrer les anciens messages sur cet appareil.');
+              if (!ok) return;
+              if (userId) await wipeLocalKeys(userId);
+              const session = getSession();
+              if (session) await logoutUser(session);
+              clearSession();
+              window.localStorage.removeItem('ghost_profile_name');
+              window.localStorage.removeItem('ghost_profile_status');
+              router.replace('/login');
+            }}
+          >
+            Effacer les cles (wipe appareil)
           </button>
         </section>
 

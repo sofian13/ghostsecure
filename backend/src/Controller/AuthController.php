@@ -7,6 +7,7 @@ use App\Service\AuthService;
 use App\Service\AuthThrottleService;
 use App\Service\JsonFactory;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
@@ -17,7 +18,8 @@ class AuthController
         private readonly EntityManagerInterface $em,
         private readonly AuthService $auth,
         private readonly AuthThrottleService $throttle,
-        private readonly JsonFactory $json
+        private readonly JsonFactory $json,
+        private readonly LoggerInterface $logger
     ) {
     }
 
@@ -28,9 +30,14 @@ class AuthController
             return $this->json->ok(['ok' => true]);
         }
 
+        if (!$this->isJsonContentType($request)) {
+            return $this->json->error('Content-Type must be application/json.', 415);
+        }
+
         $ip = $this->extractClientIp($request);
         $globalKey = sprintf('ip:%s', $ip);
         if (!$this->throttle->isAllowed('register', $globalKey)) {
+            $this->logger->warning('Register rate limit hit', ['ip' => $ip]);
             return $this->json->error('Too many registration attempts. Try again later.', 429);
         }
 
@@ -69,6 +76,7 @@ class AuthController
 
         $this->em->flush();
         $token = $this->auth->issueToken($user);
+        $this->logger->info('User registered', ['userId' => $userId]);
 
         return $this->json->ok([
             'userId' => $user->getId(),
@@ -84,9 +92,14 @@ class AuthController
             return $this->json->ok(['ok' => true]);
         }
 
+        if (!$this->isJsonContentType($request)) {
+            return $this->json->error('Content-Type must be application/json.', 415);
+        }
+
         $ip = $this->extractClientIp($request);
         $globalKey = sprintf('ip:%s', $ip);
         if (!$this->throttle->isAllowed('login', $globalKey)) {
+            $this->logger->warning('Login rate limit hit', ['ip' => $ip]);
             return $this->json->error('Too many login attempts. Try again later.', 429);
         }
 
@@ -99,11 +112,13 @@ class AuthController
         $secret = (string) ($payload['secret'] ?? '');
         $userScopeKey = sprintf('ip:%s:user:%s', $ip, strtolower($userId));
         if ($userId !== '' && !$this->throttle->isAllowed('login_user', $userScopeKey)) {
+            $this->logger->warning('Login user rate limit hit', ['userId' => $userId, 'ip' => $ip]);
             return $this->json->error('Too many login attempts. Try again later.', 429);
         }
 
         $userOnlyKey = sprintf('user:%s', strtolower($userId));
         if ($userId !== '' && !$this->throttle->isAllowed('login_user_only', $userOnlyKey)) {
+            $this->logger->warning('Login user-only rate limit hit', ['userId' => $userId]);
             return $this->json->error('Too many login attempts. Try again later.', 429);
         }
 
@@ -113,20 +128,24 @@ class AuthController
 
         $user = $this->em->getRepository(User::class)->find($userId);
         if (!$user instanceof User) {
+            $this->logger->notice('Login failed: user not found', ['userId' => $userId, 'ip' => $ip]);
             return $this->json->error('Invalid credentials.', 401);
         }
 
         $hash = $user->getSecretHash();
         if (!is_string($hash) || $hash === '') {
+            $this->logger->notice('Login failed: no secret hash', ['userId' => $userId, 'ip' => $ip]);
             return $this->json->error('Invalid credentials.', 401);
         }
         if (!password_verify($secret, $hash)) {
+            $this->logger->notice('Login failed: wrong password', ['userId' => $userId, 'ip' => $ip]);
             return $this->json->error('Invalid credentials.', 401);
         }
 
         $token = $this->auth->issueToken($user);
         $this->throttle->reset('login_user', $userScopeKey);
         $this->throttle->reset('login_user_only', $userOnlyKey);
+        $this->logger->info('Login success', ['userId' => $userId]);
 
         return $this->json->ok([
             'userId' => $user->getId(),
@@ -157,6 +176,27 @@ class AuthController
         return $this->json->ok(['ok' => true]);
     }
 
+    #[Route('/auth/logout-all', name: 'api_auth_logout_all', methods: ['POST', 'OPTIONS'])]
+    public function logoutAll(Request $request)
+    {
+        if ($request->isMethod('OPTIONS')) {
+            return $this->json->ok(['ok' => true]);
+        }
+
+        $me = $this->auth->requireUser($request);
+        if (!$me instanceof User) {
+            return $this->json->error('Unauthorized.', 401);
+        }
+
+        $deleted = $this->em->getConnection()->executeStatement(
+            'DELETE FROM user_session WHERE user_id = :uid',
+            ['uid' => $me->getId()]
+        );
+        $this->logger->info('Logout all sessions', ['userId' => $me->getId(), 'count' => $deleted]);
+
+        return $this->json->ok(['ok' => true, 'sessionsRevoked' => $deleted]);
+    }
+
     private function validatePublicKey(string $publicKey): bool
     {
         $len = strlen($publicKey);
@@ -164,6 +204,12 @@ class AuthController
             return false;
         }
         return (bool) preg_match('#^[A-Za-z0-9+/=\s]+$#', $publicKey);
+    }
+
+    private function isJsonContentType(Request $request): bool
+    {
+        $contentType = (string) $request->headers->get('Content-Type', '');
+        return str_contains($contentType, 'application/json');
     }
 
     private function extractClientIp(Request $request): string
