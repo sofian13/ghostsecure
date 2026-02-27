@@ -60,6 +60,7 @@ export default function ConversationPage() {
   const loadContext = async (s: Session) => {
     const detail = await fetchConversationDetail(s, conversationId);
     detailRef.current = detail;
+    detailFetchedAtRef.current = Date.now();
     setConversationKind(detail.kind);
     if (detail.kind === 'group') {
       setPeerId(detail.title?.trim() || 'Groupe');
@@ -207,18 +208,27 @@ export default function ConversationPage() {
     }
   });
 
-  // Cache conversation detail to avoid re-fetching on every send
+  // Keep conversation detail fresh enough to pick up key rotation across devices.
   const detailRef = useRef<Awaited<ReturnType<typeof fetchConversationDetail>> | null>(null);
+  const detailFetchedAtRef = useRef<number>(0);
+  const DETAIL_MAX_AGE_MS = 10_000;
 
-  const getDetail = async (s: Session) => {
-    if (!detailRef.current) {
+  const getDetail = async (
+    s: Session,
+    options?: { forceRefresh?: boolean; maxAgeMs?: number }
+  ) => {
+    const maxAgeMs = options?.maxAgeMs ?? DETAIL_MAX_AGE_MS;
+    const isStale = Date.now() - detailFetchedAtRef.current > maxAgeMs;
+    if (!detailRef.current || options?.forceRefresh || isStale) {
       detailRef.current = await fetchConversationDetail(s, conversationId);
+      detailFetchedAtRef.current = Date.now();
     }
     return detailRef.current;
   };
 
   const encryptAndSend = async (s: Session, plaintext: string): Promise<DecryptedMessage | null> => {
-    const detail = await getDetail(s);
+    // Force a fresh participant-key read before each send.
+    const detail = await getDetail(s, { forceRefresh: true });
     const peer = detail.kind === 'direct'
       ? detail.participants.find((p) => p.id !== s.userId)
       : undefined;
