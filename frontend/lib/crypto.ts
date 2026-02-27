@@ -74,14 +74,13 @@ export async function ensureIdentity(userId: string): Promise<{ publicKey: strin
   const stored = await idbGet<CryptoKey | JsonWebKey>(keyId);
 
   if (stored) {
-    // Already a non-extractable CryptoKey — can't export the public key.
-    // Delete it and fall through to generate a fresh keypair so the caller
-    // always receives a usable publicKey (needed for registration).
+    // Already a non-extractable CryptoKey — user is already registered.
+    // Can't export the public key, but login doesn't need it.
     if (stored instanceof CryptoKey) {
-      await idbDelete(keyId);
-      await idbDelete(`ecdh-private:${userId}`);
-      // Fall through to key generation below
-    } else if (isJsonWebKey(stored)) {
+      return { publicKey: '' };
+    }
+
+    if (isJsonWebKey(stored)) {
       // Legacy JWK — validate and migrate to non-extractable CryptoKey
       const jwk = stored;
       if (

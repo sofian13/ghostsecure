@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ensureIdentity } from '@/lib/crypto';
+import { ensureIdentity, wipeLocalKeys } from '@/lib/crypto';
 import { loginUser, registerUser, uploadPreKeyBundle, fetchOtkCount } from '@/lib/api';
 import { initRatchetIdentity, exportPreKeyBundle, generateNewPreKeys } from '@/lib/ratchet';
 import { setSession } from '@/lib/session';
@@ -33,7 +33,14 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      const keys = await ensureIdentity(userId);
+      let keys = await ensureIdentity(userId);
+
+      // For registration: if keys already exist as non-extractable (publicKey empty),
+      // wipe and regenerate so we can export the public key for the server.
+      if (mode === 'register' && !keys.publicKey) {
+        await wipeLocalKeys(userId);
+        keys = await ensureIdentity(userId);
+      }
 
       // Generate Signal Protocol identity and pre-key bundle
       let preKeyBundle: Awaited<ReturnType<typeof exportPreKeyBundle>> | undefined;

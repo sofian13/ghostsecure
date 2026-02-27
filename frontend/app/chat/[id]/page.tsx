@@ -58,6 +58,7 @@ export default function ConversationPage() {
 
   const loadContext = async (s: Session) => {
     const detail = await fetchConversationDetail(s, conversationId);
+    detailRef.current = detail;
     setConversationKind(detail.kind);
     if (detail.kind === 'group') {
       setPeerId(detail.title?.trim() || 'Groupe');
@@ -67,10 +68,25 @@ export default function ConversationPage() {
     setPeerId(peer);
   };
 
+  // Track already-decrypted message IDs to avoid re-decrypting on every poll
+  const knownIdsRef = useRef<Set<string>>(new Set());
+
   const loadMessages = async (s: Session) => {
     const encrypted = await fetchMessages(s, conversationId);
-    const decrypted = await Promise.all(encrypted.map((m) => decryptForUser(s.userId, m, conversationId)));
-    setMessages(sortAndDedupe(decrypted.filter((m): m is DecryptedMessage => Boolean(m))));
+    // Only decrypt messages we haven't seen yet
+    const newMessages = encrypted.filter((m) => !knownIdsRef.current.has(m.id));
+    if (newMessages.length === 0 && knownIdsRef.current.size > 0) return;
+
+    const newDecrypted = await Promise.all(
+      newMessages.map((m) => decryptForUser(s.userId, m, conversationId))
+    );
+    const validNew = newDecrypted.filter((m): m is DecryptedMessage => Boolean(m));
+
+    for (const m of validNew) knownIdsRef.current.add(m.id);
+
+    if (validNew.length > 0) {
+      setMessages((prev) => sortAndDedupe([...prev, ...validNew]));
+    }
   };
 
   useEffect(() => {
@@ -143,12 +159,27 @@ export default function ConversationPage() {
     const event = payload as { type?: string; conversationId?: string; message?: EncryptedMessage };
     if (!session) return;
     if (event.type !== 'new_message' || event.conversationId !== conversationId || !event.message) return;
+    // Skip if already shown (optimistic display or previous poll)
+    if (knownIdsRef.current.has(event.message.id)) return;
     const decrypted = await decryptForUser(session.userId, event.message, conversationId);
-    if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
+    if (decrypted) {
+      knownIdsRef.current.add(decrypted.id);
+      setMessages((prev) => sortAndDedupe([...prev, decrypted]));
+    }
   });
 
+  // Cache conversation detail to avoid re-fetching on every send
+  const detailRef = useRef<Awaited<ReturnType<typeof fetchConversationDetail>> | null>(null);
+
+  const getDetail = async (s: Session) => {
+    if (!detailRef.current) {
+      detailRef.current = await fetchConversationDetail(s, conversationId);
+    }
+    return detailRef.current;
+  };
+
   const encryptAndSend = async (s: Session, plaintext: string): Promise<DecryptedMessage | null> => {
-    const detail = await fetchConversationDetail(s, conversationId);
+    const detail = await getDetail(s);
     const peer = detail.kind === 'direct'
       ? detail.participants.find((p) => p.id !== s.userId)
       : undefined;
@@ -158,7 +189,6 @@ export default function ConversationPage() {
       try {
         const hasSession = await hasRatchetSession(conversationId);
         if (!hasSession && peer.identityKey && peer.signedPrekey && peer.signedPrekeySignature && peer.registrationId) {
-          // Fetch full bundle (consumes an OTK) and create outbound session
           const bundle = await fetchPreKeyBundle(s, peer.id);
           await createOutboundSession(s.userId, conversationId, bundle);
         }
@@ -166,7 +196,7 @@ export default function ConversationPage() {
         if (await hasRatchetSession(conversationId)) {
           const encrypted = await encryptRatchet(s.userId, conversationId, plaintext, s.userId, peer.id);
           const sent = await sendMessage(s, conversationId, encrypted);
-          return decryptForUser(s.userId, sent, conversationId);
+          return buildSenderMessage(sent, s.userId, plaintext);
         }
       } catch {
         // Fallback to ECDH/RSA on ratchet failure
@@ -181,18 +211,23 @@ export default function ConversationPage() {
       s.userId
     );
     const sent = await sendMessage(s, conversationId, { ...encrypted });
-    return decryptForUser(s.userId, sent, conversationId);
+    return buildSenderMessage(sent, s.userId, plaintext);
   };
 
   const sendText = async (e: FormEvent) => {
     e.preventDefault();
     if (!session || !input.trim()) return;
+    const text = input.trim();
+    setInput('');
 
     try {
-      const decrypted = await encryptAndSend(session, input.trim());
-      if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
-      setInput('');
+      const decrypted = await encryptAndSend(session, text);
+      if (decrypted) {
+        knownIdsRef.current.add(decrypted.id);
+        setMessages((prev) => sortAndDedupe([...prev, decrypted]));
+      }
     } catch (err) {
+      setInput(text);
       setError(normalizeError(err, 'Message non envoye'));
     }
   };
@@ -266,7 +301,10 @@ export default function ConversationPage() {
         durationMs: draftVoiceDurationMs || 1000,
       });
       const decrypted = await encryptAndSend(session, payload);
-      if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
+      if (decrypted) {
+        knownIdsRef.current.add(decrypted.id);
+        setMessages((prev) => sortAndDedupe([...prev, decrypted]));
+      }
       discardDraftVoice();
     } catch {
       setError("Erreur d'envoi vocal");
@@ -295,7 +333,10 @@ export default function ConversationPage() {
       });
 
       const decrypted = await encryptAndSend(session, payload);
-      if (decrypted) setMessages((prev) => sortAndDedupe([...prev, decrypted]));
+      if (decrypted) {
+        knownIdsRef.current.add(decrypted.id);
+        setMessages((prev) => sortAndDedupe([...prev, decrypted]));
+      }
     } catch {
       setError("Erreur envoi piece jointe");
     }
@@ -571,6 +612,38 @@ export default function ConversationPage() {
       </main>
     </SecurityShell>
   );
+}
+
+/**
+ * Build a DecryptedMessage for the sender from the API response and plaintext.
+ * The sender already knows the plaintext — no need to decrypt their own message.
+ */
+function buildSenderMessage(sent: EncryptedMessage, senderId: string, plaintext: string): DecryptedMessage {
+  let voice: DecryptedMessage['voice'];
+  let file: DecryptedMessage['file'];
+  try {
+    const parsed = JSON.parse(plaintext) as {
+      type?: string; mimeType?: string; dataBase64?: string;
+      durationMs?: number; name?: string; sizeBytes?: number;
+    };
+    if (parsed.type === 'voice' && parsed.mimeType && parsed.dataBase64) {
+      voice = { mimeType: parsed.mimeType, dataBase64: parsed.dataBase64, durationMs: Math.max(0, Number(parsed.durationMs ?? 0)) };
+    }
+    if (parsed.type === 'file' && parsed.mimeType && parsed.dataBase64 && parsed.name) {
+      file = { name: parsed.name, mimeType: parsed.mimeType, dataBase64: parsed.dataBase64, sizeBytes: Math.max(0, Number(parsed.sizeBytes ?? 0)) };
+    }
+  } catch { /* plain text message */ }
+
+  return {
+    id: sent.id,
+    senderId,
+    kind: voice ? 'voice' : file ? 'file' : 'text',
+    text: voice || file ? undefined : plaintext,
+    voice,
+    file,
+    createdAt: sent.createdAt,
+    expiresAt: sent.expiresAt,
+  };
 }
 
 function normalizeError(err: unknown, fallback: string): string {

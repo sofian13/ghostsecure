@@ -298,7 +298,7 @@ export async function encryptRatchet(
   return {
     ciphertext: toBase64(protocolBytes),
     iv: 'ratchet',
-    wrappedKeys: { [recipientId]: 'ratchet' },
+    wrappedKeys: { [recipientId]: 'ratchet', [senderId]: 'ratchet' },
     ratchetHeader: JSON.stringify({ v: 3, type: isPreKey ? 'prekey' : 'msg' }),
   };
 }
