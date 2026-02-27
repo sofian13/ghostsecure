@@ -35,7 +35,7 @@ async function importPublicKey(spkiBase64: string): Promise<CryptoKey> {
     fromBase64(spkiBase64),
     { name: 'RSA-OAEP', hash: 'SHA-256' },
     true,
-    ['encrypt']
+    ['wrapKey']
   );
 }
 
@@ -45,7 +45,7 @@ async function importPrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
     jwk,
     { name: 'RSA-OAEP', hash: 'SHA-256' },
     false,
-    ['decrypt']
+    ['unwrapKey']
   );
 }
 
@@ -73,7 +73,7 @@ export async function ensureIdentity(userId: string): Promise<{ publicKey: strin
       hash: 'SHA-256'
     },
     true,
-    ['encrypt', 'decrypt']
+    ['wrapKey', 'unwrapKey']
   );
 
   const privateJwk = await exportPrivateKeyJwk(keyPair.privateKey);
@@ -89,14 +89,14 @@ async function derivePublicFromPrivateJwk(privateJwk: JsonWebKey): Promise<strin
     e: privateJwk.e,
     alg: privateJwk.alg,
     ext: true,
-    key_ops: ['encrypt']
+    key_ops: ['wrapKey']
   };
   const publicKey = await crypto.subtle.importKey(
     'jwk',
     publicJwk,
     { name: 'RSA-OAEP', hash: 'SHA-256' },
     true,
-    ['encrypt']
+    ['wrapKey']
   );
   return exportPublicKey(publicKey);
 }
