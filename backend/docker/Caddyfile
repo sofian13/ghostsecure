@@ -1,20 +1,16 @@
 :8000 {
 	root * /app/public
 
-	@api_cors_allowed {
-		path /api/*
-		header_regexp Origin ^(https://(www\.)?ghostsecure\.fr|http://localhost:3000)$
-	}
-	header @api_cors_allowed Access-Control-Allow-Origin "{http.request.header.Origin}"
-	header @api_cors_allowed Access-Control-Allow-Headers "Content-Type, Authorization"
-	header @api_cors_allowed Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS"
-	header @api_cors_allowed Access-Control-Allow-Credentials "false"
-	header @api_cors_allowed Vary "Origin"
+	@api path /api/*
+	header @api Access-Control-Allow-Origin "*"
+	header @api Access-Control-Allow-Headers "Content-Type, Authorization"
+	header @api Access-Control-Allow-Methods "GET,POST,DELETE,OPTIONS"
+	header @api Access-Control-Allow-Credentials "false"
+	header @api Vary "Origin"
 
 	@api_preflight {
 		method OPTIONS
 		path /api/*
-		header_regexp Origin ^(https://(www\.)?ghostsecure\.fr|http://localhost:3000)$
 	}
 	respond @api_preflight 204
 
