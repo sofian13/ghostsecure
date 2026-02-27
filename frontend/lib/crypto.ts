@@ -258,34 +258,19 @@ export async function encryptForParticipants(
   );
 
   const wrappedKeys: Record<string, string> = {};
-  let ephemeralPublicKey: string | undefined;
 
-  // Generate a single ephemeral ECDH keypair shared by all participants
-  const needsEcdh = participants.some((p) => p.ecdhPublicKey && conversationId);
-  const ephPair = needsEcdh
-    ? await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])
-    : null;
-  if (ephPair) {
-    ephemeralPublicKey = await exportPublicKey(ephPair.publicKey);
-  }
-
+  // Always use RSA-OAEP for wrapping — reliable regardless of ECDH key state.
+  // ECDH forward secrecy is disabled until key lifecycle management is solid.
   for (const participant of participants) {
-    if (participant.ecdhPublicKey && conversationId && ephPair) {
-      // Forward secrecy path: ECDH key wrapping (shared ephemeral keypair)
-      wrappedKeys[participant.id] = await ecdhWrapKey(aesKey, participant.ecdhPublicKey, conversationId, ephPair);
-    } else {
-      // Legacy RSA-OAEP wrapping
-      const recipientPub = await importPublicKey(participant.publicKey);
-      const wrapped = await crypto.subtle.wrapKey('raw', aesKey, recipientPub, { name: 'RSA-OAEP' });
-      wrappedKeys[participant.id] = toBase64(wrapped);
-    }
+    const recipientPub = await importPublicKey(participant.publicKey);
+    const wrapped = await crypto.subtle.wrapKey('raw', aesKey, recipientPub, { name: 'RSA-OAEP' });
+    wrappedKeys[participant.id] = toBase64(wrapped);
   }
 
   return {
     ciphertext: toBase64(ciphertext),
     iv: toBase64(iv.buffer),
     wrappedKeys,
-    ephemeralPublicKey
   };
 }
 
@@ -297,48 +282,11 @@ export async function decryptIncomingMessage(userId: string, payload: {
 }, conversationId?: string, createdAt?: string): Promise<string> {
   let aesKey: CryptoKey;
 
-  if (payload.ephemeralPublicKey && conversationId) {
-    // Forward secrecy path: ECDH unwrap
-    const ecdhPrivate = await idbGet<CryptoKey>(`ecdh-private:${userId}`);
-    if (!ecdhPrivate) {
-      throw new Error('ECDH private key unavailable on this device');
-    }
-
-    const ephPub = await crypto.subtle.importKey(
-      'spki',
-      fromBase64(payload.ephemeralPublicKey),
-      { name: 'ECDH', namedCurve: 'P-256' },
-      false,
-      []
-    );
-
-    const sharedBits = await crypto.subtle.deriveBits(
-      { name: 'ECDH', public: ephPub },
-      ecdhPrivate,
-      256
-    );
-
-    const hkdfKey = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
-    const wrappingKey = await crypto.subtle.deriveKey(
-      { name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode(conversationId), info: new Uint8Array(0) },
-      hkdfKey,
-      { name: 'AES-KW', length: 256 },
-      false,
-      ['unwrapKey']
-    );
-
-    aesKey = await crypto.subtle.unwrapKey(
-      'raw',
-      fromBase64(payload.wrappedKey),
-      wrappingKey,
-      'AES-KW',
-      { name: 'AES-GCM' },
-      false,
-      ['decrypt']
-    );
-  } else {
-    // Legacy RSA-OAEP unwrap
-    const privateKey = await getPrivateKey(userId);
+  // Always try RSA-OAEP first (most reliable). Only fall back to ECDH for
+  // legacy messages that were encrypted with the ECDH path.
+  const privateKey = await getPrivateKey(userId);
+  let rsaOk = false;
+  try {
     aesKey = await crypto.subtle.unwrapKey(
       'raw',
       fromBase64(payload.wrappedKey),
@@ -348,7 +296,52 @@ export async function decryptIncomingMessage(userId: string, payload: {
       false,
       ['decrypt']
     );
+    rsaOk = true;
+  } catch {
+    // RSA unwrap failed — try ECDH if ephemeral key is present
+    if (payload.ephemeralPublicKey && conversationId) {
+      const ecdhPrivate = await idbGet<CryptoKey>(`ecdh-private:${userId}`);
+      if (!ecdhPrivate) {
+        throw new Error('ECDH private key unavailable on this device');
+      }
+
+      const ephPub = await crypto.subtle.importKey(
+        'spki',
+        fromBase64(payload.ephemeralPublicKey),
+        { name: 'ECDH', namedCurve: 'P-256' },
+        false,
+        []
+      );
+
+      const sharedBits = await crypto.subtle.deriveBits(
+        { name: 'ECDH', public: ephPub },
+        ecdhPrivate,
+        256
+      );
+
+      const hkdfKey = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
+      const wrappingKey = await crypto.subtle.deriveKey(
+        { name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode(conversationId), info: new Uint8Array(0) },
+        hkdfKey,
+        { name: 'AES-KW', length: 256 },
+        false,
+        ['unwrapKey']
+      );
+
+      aesKey = await crypto.subtle.unwrapKey(
+        'raw',
+        fromBase64(payload.wrappedKey),
+        wrappingKey,
+        'AES-KW',
+        { name: 'AES-GCM' },
+        false,
+        ['decrypt']
+      );
+    } else {
+      throw new Error('RSA unwrap failed and no ECDH fallback available');
+    }
   }
+  if (!rsaOk) console.debug('[GS:decrypt] RSA failed, used ECDH fallback');
 
   const iv = new Uint8Array(fromBase64(payload.iv));
   const ciphertextBuf = fromBase64(payload.ciphertext);
