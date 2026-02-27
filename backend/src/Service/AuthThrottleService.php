@@ -14,10 +14,15 @@ class AuthThrottleService
         }
     }
 
+    private const SCOPE_DEFAULTS = [
+        'prekey_fetch' => ['max' => 10, 'window' => 300],
+    ];
+
     public function isAllowed(string $scope, string $key): bool
     {
-        $limit = $this->readIntEnv(strtoupper(sprintf('APP_AUTH_RATE_LIMIT_%s_MAX', $scope)), 20);
-        $windowSeconds = $this->readIntEnv(strtoupper(sprintf('APP_AUTH_RATE_LIMIT_%s_WINDOW', $scope)), 300);
+        $defaults = self::SCOPE_DEFAULTS[$scope] ?? ['max' => 20, 'window' => 300];
+        $limit = $this->readIntEnv(strtoupper(sprintf('APP_AUTH_RATE_LIMIT_%s_MAX', $scope)), $defaults['max']);
+        $windowSeconds = $this->readIntEnv(strtoupper(sprintf('APP_AUTH_RATE_LIMIT_%s_WINDOW', $scope)), $defaults['window']);
         $now = time();
         $file = $this->filePath($scope, $key);
 

@@ -49,6 +49,9 @@ async function importPrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
   );
 }
 
+// Deliberate choice: RSASSA-PKCS1-v1_5 (RS256) is used here instead of RSA-PSS
+// because PHP's openssl_verify() with OPENSSL_ALGO_SHA256 expects PKCS#1 v1.5.
+// Both schemes are secure for signatures; this matches the backend verifier.
 async function signRegistrationProof(userId: string, privateKeyJwk: JsonWebKey): Promise<string> {
   const signingKey = await crypto.subtle.importKey(
     'jwk',
@@ -353,6 +356,11 @@ export async function decryptIncomingMessage(userId: string, payload: {
   const ciphertextBuf = fromBase64(payload.ciphertext);
   const encoder = new TextEncoder();
 
+  // AAD enforcement: always try with conversation ID as additional authenticated data.
+  // This binds ciphertext to its conversation and prevents cross-conversation replay.
+  // All new messages are encrypted with AAD. The no-AAD fallback below exists solely
+  // for messages encrypted before AAD was introduced — it will be removed in a future
+  // release once all legacy messages have expired or been migrated.
   if (conversationId) {
     try {
       const plainBuffer = await crypto.subtle.decrypt(
@@ -362,7 +370,7 @@ export async function decryptIncomingMessage(userId: string, payload: {
       );
       return new TextDecoder().decode(plainBuffer);
     } catch {
-      // Backward compatibility: retry without AAD for messages sent before AAD enforcement
+      // Legacy fallback: message was encrypted without AAD (pre-enforcement)
     }
   }
 

@@ -98,7 +98,8 @@ class PreKeyController
             return $this->json->error('Unauthorized.', 401);
         }
 
-        // Rate limit: prevent OTK exhaustion attacks (10 fetches per 60s per user)
+        // Rate limit: prevent OTK exhaustion attacks.
+        // Defaults: 10 req / 300s. Override via APP_AUTH_RATE_LIMIT_PREKEY_FETCH_MAX / _WINDOW.
         $throttleKey = sprintf('user:%s:peer:%s', $me->getId(), $userId);
         if (!$this->throttle->isAllowed('prekey_fetch', $throttleKey)) {
             return $this->json->error('Too many pre-key requests. Try again later.', 429);

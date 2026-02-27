@@ -192,26 +192,59 @@ FROM app_user;
 
 GRANT SELECT ON app_user_public TO anon, authenticated;
 
--- 10) Minimal RLS policies for realtime subscriptions
--- message: SELECT only (realtime delivery)
+-- =============================================================
+-- 10) RLS policies — minimal surface for Supabase anon client
+-- =============================================================
+-- Architecture: the frontend uses the Supabase anon key (no Supabase Auth).
+-- All write operations for messages/conversations go through the backend API.
+-- Supabase is used only for: realtime subscriptions, friend requests, call signaling.
+-- Since there is no Supabase Auth identity (auth.uid() is null for anon),
+-- row-level identity filtering is not possible. Instead we restrict the
+-- allowed operations and column values to minimize abuse surface.
+
+-- message: SELECT only. All writes go through the backend API (never via Supabase client).
+-- Content is E2EE — reading ciphertext without keys reveals nothing.
 GRANT SELECT ON message TO anon, authenticated;
 DROP POLICY IF EXISTS message_select_policy ON message;
 CREATE POLICY message_select_policy ON message FOR SELECT USING (true);
+-- No INSERT/UPDATE/DELETE policy = blocked by RLS.
 
--- friend_request: SELECT, INSERT, UPDATE (no DELETE)
+-- friend_request: SELECT + INSERT + UPDATE (no DELETE).
 GRANT SELECT, INSERT, UPDATE ON friend_request TO anon, authenticated;
 DROP POLICY IF EXISTS friend_request_select_policy ON friend_request;
 DROP POLICY IF EXISTS friend_request_insert_policy ON friend_request;
 DROP POLICY IF EXISTS friend_request_update_policy ON friend_request;
-CREATE POLICY friend_request_select_policy ON friend_request FOR SELECT USING (true);
-CREATE POLICY friend_request_insert_policy ON friend_request FOR INSERT WITH CHECK (true);
-CREATE POLICY friend_request_update_policy ON friend_request FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY friend_request_select_policy ON friend_request
+  FOR SELECT USING (true);
+-- INSERT: only allow creating requests with 'pending' status
+CREATE POLICY friend_request_insert_policy ON friend_request
+  FOR INSERT WITH CHECK (
+    status = 'pending'
+    AND requester_id IS NOT NULL AND requester_id <> ''
+    AND target_user_id IS NOT NULL AND target_user_id <> ''
+    AND requester_id <> target_user_id
+  );
+-- UPDATE: only allow changing status to accepted/rejected (no field tampering)
+CREATE POLICY friend_request_update_policy ON friend_request
+  FOR UPDATE USING (true)
+  WITH CHECK (status IN ('accepted', 'rejected'));
 
--- call_invite: SELECT, INSERT, UPDATE (no DELETE)
+-- call_invite: SELECT + INSERT + UPDATE (no DELETE).
 GRANT SELECT, INSERT, UPDATE ON call_invite TO anon, authenticated;
 DROP POLICY IF EXISTS call_invite_select_policy ON call_invite;
 DROP POLICY IF EXISTS call_invite_insert_policy ON call_invite;
 DROP POLICY IF EXISTS call_invite_update_policy ON call_invite;
-CREATE POLICY call_invite_select_policy ON call_invite FOR SELECT USING (true);
-CREATE POLICY call_invite_insert_policy ON call_invite FOR INSERT WITH CHECK (true);
-CREATE POLICY call_invite_update_policy ON call_invite FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY call_invite_select_policy ON call_invite
+  FOR SELECT USING (true);
+-- INSERT: only allow creating invites with 'pending' status
+CREATE POLICY call_invite_insert_policy ON call_invite
+  FOR INSERT WITH CHECK (
+    status = 'pending'
+    AND from_user_id IS NOT NULL AND from_user_id <> ''
+    AND target_user_id IS NOT NULL AND target_user_id <> ''
+    AND from_user_id <> target_user_id
+  );
+-- UPDATE: only allow valid status transitions
+CREATE POLICY call_invite_update_policy ON call_invite
+  FOR UPDATE USING (true)
+  WITH CHECK (status IN ('accepted', 'rejected', 'ended'));
