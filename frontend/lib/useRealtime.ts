@@ -17,6 +17,16 @@ type MessageRow = {
   ratchet_header: string | null;
 };
 
+function normalizeServerTimestamp(value: string): string {
+  const raw = (value ?? '').trim();
+  if (!raw) return raw;
+  // If timezone is already present, keep as-is.
+  if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(raw)) return raw;
+  // Supabase realtime may return "timestamp without time zone".
+  // Treat it as UTC to avoid client-local interpretation drift.
+  return `${raw}Z`;
+}
+
 export function useRealtime(session: Session | null, onMessage: (payload: unknown) => void): void {
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
@@ -47,7 +57,7 @@ export function useRealtime(session: Session | null, onMessage: (payload: unknow
               ciphertext: row.ciphertext,
               iv: row.iv,
               wrappedKeys,
-              createdAt: row.created_at,
+              createdAt: normalizeServerTimestamp(row.created_at),
               expiresAt: row.expires_at,
               ephemeralPublicKey: row.ephemeral_public_key ?? null,
               ratchetHeader: row.ratchet_header ?? null,

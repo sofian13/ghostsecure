@@ -13,7 +13,7 @@ import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
 import type { EncryptedMessage, Session } from '@/types';
 
-const MESSAGE_POLL_INTERVAL_MS = 5_000;
+const MESSAGE_POLL_INTERVAL_MS = 1_500;
 const MAX_POLL_INTERVAL_MS = 120_000;
 
 export default function ConversationPage() {
@@ -141,6 +141,7 @@ export default function ConversationPage() {
         })
         .finally(() => { timer = window.setTimeout(poll, delay); });
     };
+    void loadMessages(session).catch(() => null);
     timer = window.setTimeout(poll, delay);
     return () => window.clearTimeout(timer);
   }, [session, conversationId]);
