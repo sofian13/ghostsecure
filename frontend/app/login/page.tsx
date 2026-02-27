@@ -54,7 +54,7 @@ export default function LoginPage() {
       const session =
         mode === 'register'
           ? await registerUser(keys.publicKey, userId, password, keys.proof, keys.ecdhPublicKey, preKeyBundle)
-          : await loginUser(userId, password);
+          : await loginUser(userId, password, keys.publicKey || undefined, keys.ecdhPublicKey);
 
       // On login, upload pre-key bundle if available
       if (mode === 'login' && preKeyBundle) {

@@ -53,6 +53,11 @@ class User
         return $this->publicKey;
     }
 
+    public function setPublicKey(string $publicKey): void
+    {
+        $this->publicKey = $publicKey;
+    }
+
     public function getSecretHash(): ?string
     {
         return $this->secretHash;

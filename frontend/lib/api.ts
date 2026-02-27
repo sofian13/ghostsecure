@@ -149,13 +149,16 @@ export async function registerUser(
   return toSession(data.userId, data.expiresAt, data.token);
 }
 
-export async function loginUser(userId: string, password: string): Promise<Session> {
+export async function loginUser(userId: string, password: string, publicKey?: string, ecdhPublicKey?: string): Promise<Session> {
   const normalized = normalizeUserId(userId);
+  const body: Record<string, string> = { userId: normalized, secret: password };
+  if (publicKey) body.publicKey = publicKey;
+  if (ecdhPublicKey) body.ecdhPublicKey = ecdhPublicKey;
   const data = await apiRequest<{ userId: string; token?: string; expiresAt?: string }>(
     '/api/auth/login',
     {
       method: 'POST',
-      body: JSON.stringify({ userId: normalized, secret: password }),
+      body: JSON.stringify(body),
     }
   );
   return toSession(data.userId, data.expiresAt, data.token);

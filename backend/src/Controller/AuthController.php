@@ -205,6 +205,19 @@ class AuthController
             return $this->json->error('Invalid credentials.', 401);
         }
 
+        // If the client sends a new public key (lost IndexedDB / new device),
+        // update it so future messages are encrypted with the current key.
+        $newPublicKey = trim((string) ($payload['publicKey'] ?? ''));
+        if ($newPublicKey !== '' && $this->validatePublicKey($newPublicKey)) {
+            $user->setPublicKey($newPublicKey);
+            $newEcdh = trim((string) ($payload['ecdhPublicKey'] ?? ''));
+            if ($newEcdh !== '') {
+                $user->setEcdhPublicKey($newEcdh);
+            }
+            $this->em->flush();
+            $this->logger->info('Public key rotated on login', ['userId' => $userId]);
+        }
+
         $token = $this->auth->issueToken($user);
         $ttl = $this->auth->getSessionTtl();
         $this->throttle->reset('login_user', $userScopeKey);
