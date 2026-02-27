@@ -51,13 +51,13 @@ function normalizeUserId(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function toSession(userId: string, token: string): Session {
+function toSession(userId: string, token: string, expiresAt?: string): Session {
   const now = new Date();
   return {
     userId,
     token,
     issuedAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString(),
+    expiresAt: expiresAt ?? new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString(),
   };
 }
 
@@ -130,17 +130,28 @@ export async function registerUser(publicKey: string, userId: string, password: 
   return toSession(data.userId, data.token);
 }
 
-export async function loginUser(userId: string, password: string, publicKey?: string): Promise<Session> {
+export async function loginUser(userId: string, password: string): Promise<Session> {
   const normalized = normalizeUserId(userId);
-  const resolvedPublicKey = publicKey ?? '';
   const data = await apiRequest<{ userId: string; token: string }>(
     '/api/auth/login',
     {
       method: 'POST',
-      body: JSON.stringify({ userId: normalized, publicKey: resolvedPublicKey, secret: password }),
+      body: JSON.stringify({ userId: normalized, secret: password }),
     }
   );
   return toSession(data.userId, data.token);
+}
+
+export async function logoutUser(session: Session): Promise<void> {
+  try {
+    await apiRequest<{ ok: boolean }>(
+      '/api/auth/logout',
+      { method: 'POST' },
+      session
+    );
+  } catch {
+    // Best-effort: session will expire server-side regardless
+  }
 }
 
 export async function fetchConversations(session: Session): Promise<Conversation[]> {
@@ -237,7 +248,7 @@ export async function sendFriendRequest(session: Session, targetUserId: string):
   if (!target || target === me) throw new Error('Utilisateur invalide');
 
   const { data: targetUser, error: targetError } = await supabase
-    .from('app_user')
+    .from('app_user_public')
     .select('id')
     .eq('id', target)
     .maybeSingle();
@@ -301,7 +312,7 @@ export async function acceptFriendRequest(session: Session, requestId: string): 
   if (request.status !== 'pending') throw new Error('Demande deja traitee');
 
   const { data: peer, error: peerError } = await supabase
-    .from('app_user')
+    .from('app_user_public')
     .select('id,public_key')
     .eq('id', request.requester_id)
     .maybeSingle();

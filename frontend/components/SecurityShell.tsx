@@ -237,6 +237,7 @@ export default function SecurityShell({ userId, children }: Props) {
       onCut={(e) => e.preventDefault()}
       onDrop={(e) => e.preventDefault()}
       onDragStart={(e) => e.preventDefault()}
+      onContextMenu={(e) => e.preventDefault()}
     >
       <div className="watermark">{wm}</div>
       <div className="watermark-grid" aria-hidden="true">

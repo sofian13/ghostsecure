@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
+import { logoutUser } from '@/lib/api';
 import { clearSession, getSession } from '@/lib/session';
 
 type ThemeMode = 'dark' | 'light';
@@ -127,8 +128,12 @@ export default function SettingsPage() {
           <button
             className="ghost-secondary"
             type="button"
-            onClick={() => {
+            onClick={async () => {
+              const session = getSession();
+              if (session) await logoutUser(session);
               clearSession();
+              window.localStorage.removeItem('ghost_profile_name');
+              window.localStorage.removeItem('ghost_profile_status');
               router.replace('/login');
             }}
           >

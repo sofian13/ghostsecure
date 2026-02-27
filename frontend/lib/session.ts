@@ -1,7 +1,7 @@
 import type { Session } from '@/types';
 
 const KEY = 'ghost-session';
-const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 type LegacySession = {
   userId: string;

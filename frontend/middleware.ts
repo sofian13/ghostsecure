@@ -51,7 +51,7 @@ function resolveWsConnectTargets(request: NextRequest, wsBase: string): string[]
 }
 
 export function middleware(request: NextRequest) {
-  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64');
 
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? '';
   const wsBase = process.env.NEXT_PUBLIC_WS_BASE_URL ?? '';
@@ -86,6 +86,7 @@ export function middleware(request: NextRequest) {
     "media-src 'self' blob:",
     "object-src 'none'",
     "form-action 'self'",
+    "upgrade-insecure-requests",
   ].join('; ');
 
   const response = NextResponse.next();

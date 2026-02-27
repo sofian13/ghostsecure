@@ -7,6 +7,7 @@ use App\Entity\ConversationMember;
 use App\Entity\Message;
 use App\Entity\User;
 use App\Service\AuthService;
+use App\Service\AuthThrottleService;
 use App\Service\JsonFactory;
 use App\Service\MessageSerializer;
 use Doctrine\ORM\EntityManagerInterface;
@@ -19,6 +20,7 @@ class ConversationController
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly AuthService $auth,
+        private readonly AuthThrottleService $throttle,
         private readonly JsonFactory $json,
         private readonly MessageSerializer $messageSerializer
     ) {
@@ -94,6 +96,11 @@ class ConversationController
         if (!$me instanceof User) {
             return $this->json->error('Unauthorized.', 401);
         }
+
+        if (!$this->throttle->isAllowed('create_conversation', sprintf('user:%s', $me->getId()))) {
+            return $this->json->error('Too many requests. Try again later.', 429);
+        }
+
         $payload = json_decode($request->getContent(), true);
         if (!is_array($payload)) {
             return $this->json->error('Invalid JSON body.', 400);
@@ -158,6 +165,11 @@ class ConversationController
         if (!$me instanceof User) {
             return $this->json->error('Unauthorized.', 401);
         }
+
+        if (!$this->throttle->isAllowed('add_member', sprintf('user:%s', $me->getId()))) {
+            return $this->json->error('Too many requests. Try again later.', 429);
+        }
+
         if (!$this->hasAccess($me->getId(), $id)) {
             return $this->json->error('Forbidden.', 403);
         }
@@ -168,6 +180,14 @@ class ConversationController
         }
         if (!$conversation->isGroup()) {
             return $this->json->error('Only group conversations support member management.', 422);
+        }
+
+        $memberCount = (int) $this->em->getConnection()->fetchOne(
+            'SELECT COUNT(*) FROM conversation_member WHERE conversation_id = :cid',
+            ['cid' => $conversation->getId()]
+        );
+        if ($memberCount >= 100) {
+            return $this->json->error('Group member limit reached (max 100).', 422);
         }
 
         $payload = json_decode($request->getContent(), true);
@@ -292,6 +312,11 @@ class ConversationController
         if (!$me instanceof User) {
             return $this->json->error('Unauthorized.', 401);
         }
+
+        if (!$this->throttle->isAllowed('send_message', sprintf('user:%s', $me->getId()))) {
+            return $this->json->error('Too many requests. Try again later.', 429);
+        }
+
         if (!$this->hasAccess($me->getId(), $id)) {
             return $this->json->error('Forbidden.', 403);
         }
@@ -308,6 +333,17 @@ class ConversationController
 
         if ($ciphertext === '' || $iv === '' || !is_array($wrappedKeys) || count($wrappedKeys) === 0) {
             return $this->json->error('ciphertext, iv and wrappedKeys are required.', 422);
+        }
+
+        if (strlen($ciphertext) > 102400) {
+            return $this->json->error('ciphertext exceeds maximum size (100KB).', 422);
+        }
+        if (strlen($iv) > 64) {
+            return $this->json->error('iv exceeds maximum length.', 422);
+        }
+        $wrappedKeysJson = json_encode($wrappedKeys);
+        if ($wrappedKeysJson !== false && strlen($wrappedKeysJson) > 51200) {
+            return $this->json->error('wrappedKeys exceeds maximum size (50KB).', 422);
         }
 
         $conversation = $this->em->getRepository(Conversation::class)->find($id);
@@ -423,6 +459,9 @@ class ConversationController
 
         if (count($uniqueIds) < 2) {
             return $this->json->error('A group must contain at least two members.', 422);
+        }
+        if (count($uniqueIds) > 100) {
+            return $this->json->error('Group member limit reached (max 100).', 422);
         }
 
         $users = $this->em->getRepository(User::class)->findBy(['id' => array_keys($uniqueIds)]);

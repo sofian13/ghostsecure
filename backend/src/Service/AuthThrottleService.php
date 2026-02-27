@@ -23,12 +23,12 @@ class AuthThrottleService
 
         $fp = @fopen($file, 'c+');
         if ($fp === false) {
-            return true;
+            return false;
         }
 
         try {
             if (!flock($fp, LOCK_EX)) {
-                return true;
+                return false;
             }
 
             $raw = stream_get_contents($fp);

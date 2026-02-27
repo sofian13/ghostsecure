@@ -46,6 +46,14 @@ class WsServerCommand extends Command implements MessageComponentInterface
             $this->purgeExpiredMessages();
         });
 
+        $loop->addPeriodicTimer(300.0, function (): void {
+            $this->revalidateSessions();
+        });
+
+        $loop->addPeriodicTimer(600.0, function (): void {
+            $this->purgeExpiredSessions();
+        });
+
         $output->writeln('Ghost Secure WebSocket server listening on :8081');
         $loop->run();
 
@@ -68,6 +76,12 @@ class WsServerCommand extends Command implements MessageComponentInterface
 
     public function onMessage(ConnectionInterface $from, $msg): void
     {
+        if (strlen((string) $msg) > 204800) {
+            $this->wsLog(sprintf('CLOSE id=%s reason=message_too_large', (string) $from->resourceId));
+            $from->close();
+            return;
+        }
+
         $payload = json_decode((string) $msg, true);
         if (!is_array($payload)) {
             return;
@@ -136,6 +150,8 @@ class WsServerCommand extends Command implements MessageComponentInterface
             'userId' => (string) $row['user_id'],
             'lastAt' => (new \DateTimeImmutable('-10 seconds'))->format('Y-m-d H:i:sP'),
         ];
+
+        $this->enforceConnectionLimit((string) $row['user_id'], $conn);
 
         $conn->send(json_encode(['type' => 'authenticated']));
         $this->wsLog(sprintf('AUTH id=%s user=%s', (string) $conn->resourceId, $row['user_id']));
@@ -246,6 +262,17 @@ class WsServerCommand extends Command implements MessageComponentInterface
             return;
         }
 
+        $shareConversation = $this->db->fetchOne(
+            'SELECT 1 FROM conversation_member cm1
+             INNER JOIN conversation_member cm2 ON cm2.conversation_id = cm1.conversation_id
+             WHERE cm1.user_id = :sender AND cm2.user_id = :target LIMIT 1',
+            ['sender' => $fromMeta['userId'], 'target' => $targetUserId]
+        );
+        if (!$shareConversation) {
+            $this->wsLog(sprintf('CALL_SIGNAL_BLOCKED sender=%s target=%s reason=no_shared_conversation', $fromMeta['userId'], $targetUserId));
+            return;
+        }
+
         foreach ($this->clients as $client) {
             $meta = $this->meta[$client->resourceId] ?? null;
             if (!$meta || $meta['userId'] !== $targetUserId) {
@@ -257,6 +284,63 @@ class WsServerCommand extends Command implements MessageComponentInterface
                 'fromUserId' => $fromMeta['userId'],
                 'payload' => $payload['payload'] ?? null,
             ]));
+        }
+    }
+
+    private function enforceConnectionLimit(string $userId, ConnectionInterface $current): void
+    {
+        $maxConnections = 5;
+        $userConnections = [];
+
+        foreach ($this->clients as $client) {
+            $meta = $this->meta[$client->resourceId] ?? null;
+            if ($meta && $meta['userId'] === $userId && $client !== $current) {
+                $userConnections[] = $client;
+            }
+        }
+
+        while (count($userConnections) >= $maxConnections) {
+            $oldest = array_shift($userConnections);
+            if ($oldest) {
+                $this->wsLog(sprintf('CLOSE id=%s reason=connection_limit user=%s', (string) $oldest->resourceId, $userId));
+                $oldest->close();
+                $this->clients->detach($oldest);
+                unset($this->meta[$oldest->resourceId]);
+            }
+        }
+    }
+
+    private function revalidateSessions(): void
+    {
+        foreach ($this->clients as $client) {
+            $meta = $this->meta[$client->resourceId] ?? null;
+            if (!$meta) {
+                continue;
+            }
+
+            $valid = $this->db->fetchOne(
+                'SELECT 1 FROM user_session WHERE user_id = :uid AND expires_at > NOW() LIMIT 1',
+                ['uid' => $meta['userId']]
+            );
+            if (!$valid) {
+                $this->wsLog(sprintf('CLOSE id=%s reason=session_expired user=%s', (string) $client->resourceId, $meta['userId']));
+                $client->send((string) json_encode(['type' => 'error', 'message' => 'Session expired']));
+                $client->close();
+                $this->clients->detach($client);
+                unset($this->meta[$client->resourceId]);
+            }
+        }
+    }
+
+    private function purgeExpiredSessions(): void
+    {
+        try {
+            $deleted = $this->db->executeStatement('DELETE FROM user_session WHERE expires_at < NOW()');
+            if ($deleted > 0) {
+                $this->wsLog(sprintf('SESSION_PURGE deleted=%d expired sessions', $deleted));
+            }
+        } catch (\Throwable $e) {
+            $this->wsLog(sprintf('SESSION_PURGE error=%s', $e->getMessage()));
         }
     }
 }

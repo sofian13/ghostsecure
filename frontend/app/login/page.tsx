@@ -36,7 +36,7 @@ export default function LoginPage() {
       const session =
         mode === 'register'
           ? await registerUser(keys.publicKey, userId, password)
-          : await loginUser(userId, password, keys.publicKey);
+          : await loginUser(userId, password);
 
       setSession(session);
       router.replace('/chat');

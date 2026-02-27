@@ -57,7 +57,8 @@ function resolveIceServers(): RTCIceServer[] {
   const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL ?? '';
   if (turnUrl && turnUsername && turnCredential) {
     list.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
-  } else {
+  } else if (process.env.NODE_ENV !== 'production') {
+    console.warn('Using public TURN relay (dev only). Configure NEXT_PUBLIC_TURN_* for production.');
     list.push({ urls: 'turn:openrelay.metered.ca:80?transport=udp', username: 'openrelayproject', credential: 'openrelayproject' });
     list.push({ urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' });
     list.push({ urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' });

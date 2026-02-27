@@ -39,16 +39,23 @@ class ApiExceptionSubscriber implements EventSubscriberInterface
         }
 
         $origin = (string) $request->headers->get('Origin', '');
+        $headers = [
+            'X-Content-Type-Options' => 'nosniff',
+            'X-Frame-Options' => 'DENY',
+            'Referrer-Policy' => 'no-referrer',
+            'Strict-Transport-Security' => 'max-age=31536000; includeSubDomains; preload',
+            'X-Permitted-Cross-Domain-Policies' => 'none',
+            'Cross-Origin-Resource-Policy' => 'same-site',
+            'Permissions-Policy' => 'geolocation=(), camera=(), microphone=(self)',
+            'Cache-Control' => 'no-store, max-age=0',
+            'Pragma' => 'no-cache',
+        ];
         if ($origin !== '' && $this->isAllowedOrigin($origin)) {
-            $headers = [
-                'Access-Control-Allow-Origin' => $origin,
-                'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
-                'Access-Control-Allow-Methods' => 'GET,POST,DELETE,OPTIONS',
-                'Access-Control-Allow-Credentials' => 'false',
-                'Vary' => 'Origin',
-            ];
-        } else {
-            $headers = [];
+            $headers['Access-Control-Allow-Origin'] = $origin;
+            $headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+            $headers['Access-Control-Allow-Methods'] = 'GET,POST,DELETE,OPTIONS';
+            $headers['Access-Control-Allow-Credentials'] = 'false';
+            $headers['Vary'] = 'Origin';
         }
 
         $event->setResponse(new JsonResponse($payload, $status, $headers));

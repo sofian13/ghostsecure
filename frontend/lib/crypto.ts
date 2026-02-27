@@ -53,7 +53,13 @@ export async function ensureIdentity(userId: string): Promise<{ publicKey: strin
   const keyId = `${PRIVATE_KEY_PREFIX}${userId}`;
   const existing = await idbGet<JsonWebKey>(keyId);
   if (existing) {
-    if (!existing.n || !existing.e) {
+    if (
+      existing.kty !== 'RSA' ||
+      existing.alg !== 'RSA-OAEP-256' ||
+      !existing.n || !existing.e ||
+      !existing.d || !existing.p || !existing.q ||
+      !existing.dp || !existing.dq || !existing.qi
+    ) {
       throw new Error('Invalid key material');
     }
     return { publicKey: await derivePublicFromPrivateJwk(existing) };
@@ -119,12 +125,11 @@ export async function encryptForParticipants(plaintext: string, participants: { 
     encoder.encode(plaintext)
   );
 
-  const rawAes = await crypto.subtle.exportKey('raw', aesKey);
   const wrappedKeys: Record<string, string> = {};
 
   for (const participant of participants) {
     const recipientPub = await importPublicKey(participant.publicKey);
-    const wrapped = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, recipientPub, rawAes);
+    const wrapped = await crypto.subtle.wrapKey('raw', aesKey, recipientPub, { name: 'RSA-OAEP' });
     wrappedKeys[participant.id] = toBase64(wrapped);
   }
 
@@ -141,9 +146,15 @@ export async function decryptIncomingMessage(userId: string, payload: {
   wrappedKey: string;
 }): Promise<string> {
   const privateKey = await getPrivateKey(userId);
-  const rawAes = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, fromBase64(payload.wrappedKey));
-
-  const aesKey = await crypto.subtle.importKey('raw', rawAes, { name: 'AES-GCM' }, false, ['decrypt']);
+  const aesKey = await crypto.subtle.unwrapKey(
+    'raw',
+    fromBase64(payload.wrappedKey),
+    privateKey,
+    { name: 'RSA-OAEP' },
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  );
   const plainBuffer = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: new Uint8Array(fromBase64(payload.iv)) },
     aesKey,

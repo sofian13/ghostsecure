@@ -24,6 +24,7 @@ class JsonFactory
             'X-Permitted-Cross-Domain-Policies' => 'none',
             'Cross-Origin-Resource-Policy' => 'same-site',
             'Permissions-Policy' => 'geolocation=(), camera=(), microphone=(self)',
+            'Access-Control-Max-Age' => '3600',
             'Cache-Control' => 'no-store, max-age=0',
             'Pragma' => 'no-cache',
         ]);

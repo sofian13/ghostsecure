@@ -45,7 +45,7 @@ export async function checkSupabaseConnection(): Promise<SupabaseStatus> {
 
   try {
     const supabase = getSupabaseClient();
-    const { error } = await supabase.from('app_user').select('id', { head: true, count: 'exact' }).limit(1);
+    const { error } = await supabase.from('app_user_public').select('id', { head: true, count: 'exact' }).limit(1);
     if (error) {
       return {
         configured: true,
