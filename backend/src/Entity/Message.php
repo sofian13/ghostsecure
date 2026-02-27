@@ -17,8 +17,8 @@ class Message
     private Conversation $conversation;
 
     #[ORM\ManyToOne(targetEntity: User::class)]
-    #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
-    private User $sender;
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?User $sender;
 
     #[ORM\Column(type: 'text')]
     private string $ciphertext;
@@ -44,7 +44,7 @@ class Message
     public function __construct(
         string $id,
         Conversation $conversation,
-        User $sender,
+        ?User $sender,
         string $ciphertext,
         string $iv,
         array $wrappedKeys,
@@ -74,7 +74,7 @@ class Message
         return $this->conversation;
     }
 
-    public function getSender(): User
+    public function getSender(): ?User
     {
         return $this->sender;
     }

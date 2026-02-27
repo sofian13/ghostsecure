@@ -63,7 +63,7 @@ class AuthController
 
         $existing = $this->em->getRepository(User::class)->find($userId);
         if ($existing instanceof User) {
-            return $this->json->error('User already exists.', 409);
+            return $this->json->error('Registration failed.', 409);
         }
 
         if (!$this->validatePublicKey($publicKey)) {
@@ -287,8 +287,18 @@ class AuthController
 
     private function extractClientIp(Request $request): string
     {
-        // Behind a reverse proxy (Dokploy/Traefik), use the rightmost non-proxy IP
-        // to prevent spoofing via a crafted X-Forwarded-For header.
+        // Use Symfony's trusted proxy mechanism. The app is behind Caddy/Traefik,
+        // so Request::getClientIp() returns the correct IP when trusted proxies
+        // are configured (see public/index.php or Symfony trusted_proxies config).
+        // Fallback: if X-Forwarded-For exists, use only the rightmost entry
+        // (added by the last trusted proxy — not spoofable by the client).
+        $ip = $request->getClientIp();
+
+        if ($ip !== null && $ip !== '' && $ip !== '127.0.0.1') {
+            return $ip;
+        }
+
+        // Manual fallback for environments without trusted proxy config
         $forwarded = trim((string) $request->headers->get('X-Forwarded-For', ''));
         if ($forwarded !== '') {
             $parts = array_values(array_filter(
@@ -301,7 +311,6 @@ class AuthController
             }
         }
 
-        $ip = trim((string) $request->getClientIp());
-        return $ip !== '' ? $ip : 'unknown';
+        return $ip !== null && $ip !== '' ? $ip : 'unknown';
     }
 }

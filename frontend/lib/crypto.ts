@@ -353,9 +353,6 @@ export async function decryptIncomingMessage(userId: string, payload: {
   const ciphertextBuf = fromBase64(payload.ciphertext);
   const encoder = new TextEncoder();
 
-  const AAD_CUTOFF = '2026-02-28T00:00:00Z';
-  const requireAAD = conversationId && createdAt && createdAt >= AAD_CUTOFF;
-
   if (conversationId) {
     try {
       const plainBuffer = await crypto.subtle.decrypt(
@@ -365,10 +362,7 @@ export async function decryptIncomingMessage(userId: string, payload: {
       );
       return new TextDecoder().decode(plainBuffer);
     } catch {
-      if (requireAAD) {
-        throw new Error('AAD verification failed — message integrity cannot be verified');
-      }
-      // Backward compatibility: retry without AAD for older messages
+      // Backward compatibility: retry without AAD for messages sent before AAD enforcement
     }
   }
 

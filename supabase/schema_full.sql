@@ -7,12 +7,19 @@ create table if not exists public.app_user (
   id varchar(36) primary key,
   public_key text not null,
   secret_hash varchar(255),
-  created_at timestamp without time zone not null default now()
+  created_at timestamp without time zone not null default now(),
+  ecdh_public_key text,
+  identity_key text,
+  signed_prekey text,
+  signed_prekey_signature text,
+  registration_id integer
 );
 
 create table if not exists public.conversation (
   id varchar(36) primary key,
-  created_at timestamp without time zone not null default now()
+  created_at timestamp without time zone not null default now(),
+  kind varchar(20) not null default 'direct',
+  title varchar(255)
 );
 
 create table if not exists public.conversation_member (
@@ -28,16 +35,17 @@ create index if not exists idx_cm_user on public.conversation_member(user_id);
 create table if not exists public.message (
   id varchar(36) primary key,
   conversation_id varchar(36) not null references public.conversation(id) on delete cascade,
-  sender_id varchar(36) not null references public.app_user(id) on delete cascade,
+  sender_id varchar(36) references public.app_user(id) on delete set null,
   ciphertext text not null,
   iv text not null,
   wrapped_keys jsonb not null,
   created_at timestamp without time zone not null default now(),
-  expires_at timestamp without time zone null
+  expires_at timestamp without time zone null,
+  ephemeral_public_key text,
+  ratchet_header text
 );
 
 create index if not exists idx_msg_conv_created on public.message(conversation_id, created_at);
-create index if not exists idx_msg_sender on public.message(sender_id);
 
 -- 2) Backend auth sessions (required by Symfony API + WS token validation)
 create table if not exists public.user_session (
@@ -51,7 +59,19 @@ create table if not exists public.user_session (
 create unique index if not exists uniq_session_token on public.user_session(token_hash);
 create index if not exists idx_session_user on public.user_session(user_id);
 
--- 3) Friend requests + call signaling
+-- 3) One-time pre-keys (Signal Protocol)
+create table if not exists public.one_time_prekey (
+  id uuid primary key default gen_random_uuid(),
+  user_id varchar(36) not null references public.app_user(id) on delete cascade,
+  key_id integer not null,
+  public_key text not null,
+  created_at timestamp with time zone not null default now(),
+  unique(user_id, key_id)
+);
+
+create index if not exists idx_otpk_user on public.one_time_prekey(user_id);
+
+-- 4) Friend requests + call signaling
 create table if not exists public.friend_request (
   id varchar(36) primary key,
   requester_id varchar(36) not null references public.app_user(id) on delete cascade,
@@ -83,10 +103,18 @@ create index if not exists idx_call_invite_target_status
 create index if not exists idx_call_invite_from_status
   on public.call_invite(from_user_id, status, created_at desc);
 
--- 4) Backward-compatible patch if app_user existed without secret_hash
+-- 5) Backward-compatible patches
 alter table public.app_user add column if not exists secret_hash varchar(255);
+alter table public.app_user add column if not exists ecdh_public_key text;
+alter table public.app_user add column if not exists identity_key text;
+alter table public.app_user add column if not exists signed_prekey text;
+alter table public.app_user add column if not exists signed_prekey_signature text;
+alter table public.app_user add column if not exists registration_id integer;
+alter table public.message add column if not exists ephemeral_public_key text;
+alter table public.message add column if not exists ratchet_header text;
+alter table public.message alter column sender_id drop not null;
 
--- 5) Realtime publication
+-- 6) Realtime publication
 do $$
 begin
   alter publication supabase_realtime add table public.message;
@@ -111,34 +139,79 @@ exception
   when undefined_object then null;
 end $$;
 
--- 6) RLS and grants for current app model
-alter table public.app_user disable row level security;
-alter table public.conversation disable row level security;
-alter table public.conversation_member disable row level security;
-alter table public.message disable row level security;
-alter table public.user_session disable row level security;
-alter table public.friend_request disable row level security;
-alter table public.call_invite disable row level security;
-
-grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on all tables in schema public to anon, authenticated;
-grant usage, select on all sequences in schema public to anon, authenticated;
-
-alter default privileges in schema public
-grant select, insert, update, delete on tables to anon, authenticated;
-
-alter default privileges in schema public
-grant usage, select on sequences to anon, authenticated;
-
--- 7) Mark Doctrine migrations as already executed (for containers running migrate on boot)
+-- 7) Doctrine migration tracking
 create table if not exists public.doctrine_migration_versions (
   version varchar(191) primary key,
   executed_at timestamp without time zone default null,
   execution_time integer default null
 );
 
-insert into public.doctrine_migration_versions (version, executed_at, execution_time)
-values
-  ('DoctrineMigrations\\Version20260222000100', now(), 0),
-  ('DoctrineMigrations\\Version20260224000100', now(), 0)
-on conflict (version) do nothing;
+-- =============================================================
+-- 8) SECURITY: Revoke broad permissions, enable RLS
+-- =============================================================
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon, authenticated;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM anon, authenticated;
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+
+-- Enable and force RLS on all tables
+ALTER TABLE app_user ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_user FORCE ROW LEVEL SECURITY;
+ALTER TABLE conversation ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation FORCE ROW LEVEL SECURITY;
+ALTER TABLE conversation_member ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_member FORCE ROW LEVEL SECURITY;
+ALTER TABLE message ENABLE ROW LEVEL SECURITY;
+ALTER TABLE message FORCE ROW LEVEL SECURITY;
+ALTER TABLE user_session ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_session FORCE ROW LEVEL SECURITY;
+ALTER TABLE friend_request ENABLE ROW LEVEL SECURITY;
+ALTER TABLE friend_request FORCE ROW LEVEL SECURITY;
+ALTER TABLE call_invite ENABLE ROW LEVEL SECURITY;
+ALTER TABLE call_invite FORCE ROW LEVEL SECURITY;
+ALTER TABLE one_time_prekey ENABLE ROW LEVEL SECURITY;
+ALTER TABLE one_time_prekey FORCE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'doctrine_migration_versions') THEN
+    EXECUTE 'ALTER TABLE doctrine_migration_versions ENABLE ROW LEVEL SECURITY';
+    EXECUTE 'ALTER TABLE doctrine_migration_versions FORCE ROW LEVEL SECURITY';
+  END IF;
+END $$;
+
+-- 9) Restricted public view for user lookups (no secret_hash exposed)
+CREATE OR REPLACE VIEW app_user_public AS
+SELECT id, public_key, created_at
+FROM app_user;
+
+GRANT SELECT ON app_user_public TO anon, authenticated;
+
+-- 10) Minimal RLS policies for realtime subscriptions
+-- message: SELECT only (realtime delivery)
+GRANT SELECT ON message TO anon, authenticated;
+DROP POLICY IF EXISTS message_select_policy ON message;
+CREATE POLICY message_select_policy ON message FOR SELECT USING (true);
+
+-- friend_request: SELECT, INSERT, UPDATE (no DELETE)
+GRANT SELECT, INSERT, UPDATE ON friend_request TO anon, authenticated;
+DROP POLICY IF EXISTS friend_request_select_policy ON friend_request;
+DROP POLICY IF EXISTS friend_request_insert_policy ON friend_request;
+DROP POLICY IF EXISTS friend_request_update_policy ON friend_request;
+CREATE POLICY friend_request_select_policy ON friend_request FOR SELECT USING (true);
+CREATE POLICY friend_request_insert_policy ON friend_request FOR INSERT WITH CHECK (true);
+CREATE POLICY friend_request_update_policy ON friend_request FOR UPDATE USING (true) WITH CHECK (true);
+
+-- call_invite: SELECT, INSERT, UPDATE (no DELETE)
+GRANT SELECT, INSERT, UPDATE ON call_invite TO anon, authenticated;
+DROP POLICY IF EXISTS call_invite_select_policy ON call_invite;
+DROP POLICY IF EXISTS call_invite_insert_policy ON call_invite;
+DROP POLICY IF EXISTS call_invite_update_policy ON call_invite;
+CREATE POLICY call_invite_select_policy ON call_invite FOR SELECT USING (true);
+CREATE POLICY call_invite_insert_policy ON call_invite FOR INSERT WITH CHECK (true);
+CREATE POLICY call_invite_update_policy ON call_invite FOR UPDATE USING (true) WITH CHECK (true);

@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Entity\User;
 use App\Service\AuthService;
+use App\Service\AuthThrottleService;
 use App\Service\JsonFactory;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -15,6 +16,7 @@ class PreKeyController
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly AuthService $auth,
+        private readonly AuthThrottleService $throttle,
         private readonly JsonFactory $json
     ) {
     }
@@ -96,6 +98,25 @@ class PreKeyController
             return $this->json->error('Unauthorized.', 401);
         }
 
+        // Rate limit: prevent OTK exhaustion attacks (10 fetches per 60s per user)
+        $throttleKey = sprintf('user:%s:peer:%s', $me->getId(), $userId);
+        if (!$this->throttle->isAllowed('prekey_fetch', $throttleKey)) {
+            return $this->json->error('Too many pre-key requests. Try again later.', 429);
+        }
+
+        // Require that the requester shares a conversation with the target
+        $conn = $this->em->getConnection();
+        $shared = $conn->fetchOne(
+            'SELECT 1 FROM conversation_member cm1
+             JOIN conversation_member cm2 ON cm1.conversation_id = cm2.conversation_id
+             WHERE cm1.user_id = :me AND cm2.user_id = :peer
+             LIMIT 1',
+            ['me' => $me->getId(), 'peer' => $userId]
+        );
+        if (!$shared) {
+            return $this->json->error('Forbidden.', 403);
+        }
+
         $peer = $this->em->getRepository(User::class)->find($userId);
         if (!$peer instanceof User) {
             return $this->json->error('User not found.', 404);
@@ -104,8 +125,6 @@ class PreKeyController
         if (!$peer->getIdentityKey() || !$peer->getSignedPrekey()) {
             return $this->json->error('User has no pre-key bundle.', 404);
         }
-
-        $conn = $this->em->getConnection();
 
         // Atomically consume one OTPK (oldest first)
         $otpk = $conn->fetchAssociative(
