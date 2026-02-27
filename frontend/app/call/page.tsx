@@ -8,7 +8,7 @@ import { createConversation } from '@/lib/api';
 import { getSession } from '@/lib/session';
 import { getSupabaseClient } from '@/lib/supabase';
 
-type VoicePreset = 'normal' | 'ghost' | 'robot' | 'deep' | 'vader';
+type VoicePreset = 'normal' | 'ghost' | 'robot' | 'deep' | 'vader' | 'anonymous';
 
 type InviteRow = {
   id: string;
@@ -84,6 +84,7 @@ const VOICE_PRESETS: { value: VoicePreset; label: string; emoji: string }[] = [
   { value: 'robot', label: 'Robot', emoji: '\uD83E\uDD16' },
   { value: 'deep', label: 'Deep', emoji: '\uD83C\uDF0A' },
   { value: 'vader', label: 'Vader', emoji: '\u2694\uFE0F' },
+  { value: 'anonymous', label: 'Anonymous', emoji: '\uD83C\uDFAD' },
 ];
 
 const ICE_SERVERS = resolveIceServers();
@@ -414,6 +415,51 @@ export default function CallPage() {
       shaper.connect(destination);
       shaper.connect(delay);
       delay.connect(destination);
+    } else if (preset === 'anonymous') {
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 180;
+
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = 2400;
+      lowpass.Q.value = 0.8;
+
+      const notch = ctx.createBiquadFilter();
+      notch.type = 'notch';
+      notch.frequency.value = 900;
+      notch.Q.value = 3.5;
+
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -24;
+      compressor.knee.value = 8;
+      compressor.ratio.value = 8;
+      compressor.attack.value = 0.006;
+      compressor.release.value = 0.18;
+
+      const shaper = ctx.createWaveShaper();
+      shaper.curve = createDistortionCurve(35);
+      shaper.oversample = '4x';
+
+      const tremolo = ctx.createGain();
+      tremolo.gain.value = 0.92;
+      const lfo = ctx.createOscillator();
+      const lfoDepth = ctx.createGain();
+      lfo.type = 'triangle';
+      lfo.frequency.value = 18;
+      lfoDepth.gain.value = 0.12;
+      lfo.connect(lfoDepth);
+      lfoDepth.connect(tremolo.gain);
+      lfo.start();
+      cleanup.push(() => lfo.stop());
+
+      source.connect(highpass);
+      highpass.connect(lowpass);
+      lowpass.connect(notch);
+      notch.connect(compressor);
+      compressor.connect(shaper);
+      shaper.connect(tremolo);
+      tremolo.connect(destination);
     } else {
       source.connect(destination);
     }
