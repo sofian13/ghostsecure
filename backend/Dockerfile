@@ -13,6 +13,8 @@ COPY . /app
 
 RUN composer install --no-interaction --optimize-autoloader
 
+RUN echo '[www]\nclear_env = no' > /usr/local/etc/php-fpm.d/zzz-clear-env.conf
+
 EXPOSE 8000
 
 CMD ["sh", "-c", "php-fpm -D && caddy run --config /app/docker/Caddyfile --adapter caddyfile"]
