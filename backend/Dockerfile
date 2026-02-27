@@ -13,7 +13,7 @@ COPY . /app
 
 RUN composer install --no-interaction --optimize-autoloader
 
-RUN echo '[www]\nclear_env = no' > /usr/local/etc/php-fpm.d/zzz-clear-env.conf
+RUN printf '[www]\nclear_env = no\n' > /usr/local/etc/php-fpm.d/zzz-clear-env.conf
 
 EXPOSE 8000
 
