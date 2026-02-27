@@ -350,15 +350,17 @@ class ConversationController
             return $this->json->error('ciphertext, iv and wrappedKeys are required.', 422);
         }
 
-        if (strlen($ciphertext) > 102400) {
-            return $this->json->error('ciphertext exceeds maximum size (100KB).', 422);
+        $maxCiphertextBytes = $this->readIntEnv('APP_MESSAGE_MAX_CIPHERTEXT_BYTES', 8 * 1024 * 1024);
+        if (strlen($ciphertext) > $maxCiphertextBytes) {
+            return $this->json->error(sprintf('ciphertext exceeds maximum size (%d bytes).', $maxCiphertextBytes), 422);
         }
         if (strlen($iv) > 64) {
             return $this->json->error('iv exceeds maximum length.', 422);
         }
         $wrappedKeysJson = json_encode($wrappedKeys);
-        if ($wrappedKeysJson !== false && strlen($wrappedKeysJson) > 51200) {
-            return $this->json->error('wrappedKeys exceeds maximum size (50KB).', 422);
+        $maxWrappedKeysBytes = $this->readIntEnv('APP_MESSAGE_MAX_WRAPPED_KEYS_BYTES', 256 * 1024);
+        if ($wrappedKeysJson !== false && strlen($wrappedKeysJson) > $maxWrappedKeysBytes) {
+            return $this->json->error(sprintf('wrappedKeys exceeds maximum size (%d bytes).', $maxWrappedKeysBytes), 422);
         }
 
         $conversation = $this->em->getRepository(Conversation::class)->find($id);
@@ -421,6 +423,16 @@ class ConversationController
              LIMIT 1",
             ['u1' => $userId1, 'u2' => $userId2]
         );
+    }
+
+    private function readIntEnv(string $name, int $default): int
+    {
+        $raw = getenv($name);
+        if ($raw === false || $raw === '') {
+            return $default;
+        }
+        $value = (int) $raw;
+        return $value > 0 ? $value : $default;
     }
 
     private function createDirectConversation(User $me, array $payload)

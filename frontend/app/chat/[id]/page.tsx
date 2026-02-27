@@ -343,13 +343,11 @@ export default function ConversationPage() {
   const sendDraftVoice = async () => {
     if (!session || !draftVoiceBlob) return;
     try {
-      const bytes = new Uint8Array(await draftVoiceBlob.arrayBuffer());
-      let binary = '';
-      for (const b of bytes) binary += String.fromCharCode(b);
+      const dataBase64 = arrayBufferToBase64(await draftVoiceBlob.arrayBuffer());
       const payload = JSON.stringify({
         type: 'voice',
         mimeType: draftVoiceMime || 'audio/webm',
-        dataBase64: btoa(binary),
+        dataBase64,
         durationMs: draftVoiceDurationMs || 1000,
       });
       const decrypted = await encryptAndSend(session, payload);
@@ -358,8 +356,8 @@ export default function ConversationPage() {
         setMessages((prev) => sortAndDedupe([...prev, decrypted]));
       }
       discardDraftVoice();
-    } catch {
-      setError("Erreur d'envoi vocal");
+    } catch (err) {
+      setError(normalizeError(err, "Erreur d'envoi vocal"));
     }
   };
 
@@ -373,14 +371,12 @@ export default function ConversationPage() {
     }
 
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      let binary = '';
-      for (const b of bytes) binary += String.fromCharCode(b);
+      const dataBase64 = arrayBufferToBase64(await file.arrayBuffer());
       const payload = JSON.stringify({
         type: 'file',
         name: file.name,
         mimeType: file.type || 'application/octet-stream',
-        dataBase64: btoa(binary),
+        dataBase64,
         sizeBytes: file.size,
       });
 
@@ -389,8 +385,8 @@ export default function ConversationPage() {
         knownIdsRef.current.add(decrypted.id);
         setMessages((prev) => sortAndDedupe([...prev, decrypted]));
       }
-    } catch {
-      setError("Erreur envoi piece jointe");
+    } catch (err) {
+      setError(normalizeError(err, "Erreur envoi piece jointe"));
     }
   };
 
@@ -704,6 +700,17 @@ function normalizeError(err: unknown, fallback: string): string {
   if (message.includes('forbidden')) return 'Action non autorisee.';
   if (message.includes('failed to fetch')) return 'Hors ligne. Reessayez.';
   return fallback;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    chunks.push(String.fromCharCode(...slice));
+  }
+  return btoa(chunks.join(''));
 }
 
 function sortAndDedupe(items: DecryptedMessage[]): DecryptedMessage[] {
