@@ -16,6 +16,7 @@ class AuthThrottleService
 
     private const SCOPE_DEFAULTS = [
         'prekey_fetch' => ['max' => 10, 'window' => 300],
+        'fetch_messages' => ['max' => 60, 'window' => 300],
     ];
 
     public function isAllowed(string $scope, string $key): bool

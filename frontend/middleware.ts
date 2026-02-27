@@ -78,7 +78,7 @@ export function middleware(request: NextRequest) {
     "frame-ancestors 'none'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    `style-src 'self' 'nonce-${nonce}'`,
+    `style-src 'self' 'unsafe-inline'`,
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     `script-src-elem 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     `connect-src ${connectTargets}`,

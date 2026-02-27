@@ -13,7 +13,8 @@ import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
 import type { EncryptedMessage, Session } from '@/types';
 
-const MESSAGE_POLL_INTERVAL_MS = 900;
+const MESSAGE_POLL_INTERVAL_MS = 30_000;
+const MAX_POLL_INTERVAL_MS = 120_000;
 
 export default function ConversationPage() {
   const params = useParams<{ id: string }>();
@@ -104,10 +105,20 @@ export default function ConversationPage() {
 
   useEffect(() => {
     if (!session) return;
-    const id = window.setInterval(() => {
-      void loadMessages(session).catch(() => null);
-    }, MESSAGE_POLL_INTERVAL_MS);
-    return () => window.clearInterval(id);
+    let delay = MESSAGE_POLL_INTERVAL_MS;
+    let timer: number;
+    const poll = () => {
+      loadMessages(session)
+        .then(() => { delay = MESSAGE_POLL_INTERVAL_MS; })
+        .catch((err: unknown) => {
+          if (err instanceof Error && err.message.includes('429')) {
+            delay = Math.min(delay * 2, MAX_POLL_INTERVAL_MS);
+          }
+        })
+        .finally(() => { timer = window.setTimeout(poll, delay); });
+    };
+    timer = window.setTimeout(poll, delay);
+    return () => window.clearTimeout(timer);
   }, [session, conversationId]);
 
   useEffect(() => {
