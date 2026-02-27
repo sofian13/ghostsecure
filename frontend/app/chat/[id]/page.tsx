@@ -589,7 +589,7 @@ export default function ConversationPage() {
           )}
 
           {groupedMessages.map((group) => (
-            <div key={group.label}>
+            <div key={group.label} className="message-group">
               <div className="date-separator"><span>{group.label}</span></div>
               {group.items.map((msg) => (
                 <MessageBubble

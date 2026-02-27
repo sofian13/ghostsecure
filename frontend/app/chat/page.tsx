@@ -163,6 +163,18 @@ export default function ChatListPage() {
     }
   };
 
+  useEffect(() => {
+    if (!friendStatus) return;
+    const t = setTimeout(() => setFriendStatus(null), 3000);
+    return () => clearTimeout(t);
+  }, [friendStatus]);
+
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 4000);
+    return () => clearTimeout(t);
+  }, [error]);
+
   const filteredConversations = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return conversations;

@@ -170,6 +170,16 @@ select {
   }
 }
 
+@keyframes toast-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
 @keyframes bubble-in {
   from {
     transform: scale(0.92) translateY(8px);
@@ -362,6 +372,11 @@ select {
   position: relative;
 }
 
+.search-wrap .mobile-input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
 .search-wrap .search-icon {
   position: absolute;
   left: var(--sp-3);
@@ -528,7 +543,7 @@ select {
   position: sticky;
   top: 0;
   z-index: 3;
-  padding: var(--sp-1) 0;
+  padding: var(--sp-2) var(--sp-3);
   background: linear-gradient(180deg, rgba(10, 15, 23, 0.9), transparent);
 }
 
@@ -576,6 +591,20 @@ select {
   text-align: left;
   color: inherit;
   transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+
+.request-row {
+  justify-content: space-between;
+}
+
+.request-row > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.request-row > button {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* ===== AVATAR ===== */
@@ -872,6 +901,13 @@ select {
 
 :root[data-theme='light'] .message-thread {
   background: rgba(248, 251, 255, 0.78);
+}
+
+/* Date group wrapper — must be flex so align-self on bubbles works */
+.message-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
 }
 
 /* Date separator */
