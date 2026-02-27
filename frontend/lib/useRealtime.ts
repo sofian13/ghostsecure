@@ -35,6 +35,7 @@ export function useRealtime(session: Session | null, onMessage: (payload: unknow
           const row = payload.new as MessageRow;
           const wrappedKeys = row.wrapped_keys ?? {};
           const hasKey = Object.keys(wrappedKeys).some((id) => id.trim().toLowerCase() === userId);
+          console.debug('[GS:supabase] INSERT on message table, id:', row.id, 'conv:', row.conversation_id, 'keys:', Object.keys(wrappedKeys), 'hasMyKey:', hasKey, 'myId:', userId);
           if (!hasKey) return;
 
           onMessageRef.current({

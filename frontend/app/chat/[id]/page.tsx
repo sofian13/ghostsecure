@@ -74,14 +74,26 @@ export default function ConversationPage() {
 
   const loadMessages = async (s: Session) => {
     const encrypted = await fetchMessages(s, conversationId);
+    console.debug('[GS:poll] fetched', encrypted.length, 'messages, known:', knownIdsRef.current.size);
     // Only decrypt messages we haven't seen yet
     const newMessages = encrypted.filter((m) => !knownIdsRef.current.has(m.id));
     if (newMessages.length === 0 && knownIdsRef.current.size > 0) return;
 
+    console.debug('[GS:poll] new messages to decrypt:', newMessages.length);
+    for (const m of newMessages) {
+      console.debug('[GS:poll]   msg', m.id, 'wrappedKeys:', Object.keys(m.wrappedKeys), 'hasMyKey:', !!(m.wrappedKeys[s.userId] || m.wrappedKeys[s.userId.trim().toLowerCase()]));
+    }
+
     const newDecrypted = await Promise.all(
-      newMessages.map((m) => decryptForUser(s.userId, m, conversationId))
+      newMessages.map(async (m) => {
+        const result = await decryptForUser(s.userId, m, conversationId);
+        if (!result) console.warn('[GS:poll] FAILED to decrypt msg', m.id, '- userId:', s.userId, 'keys:', Object.keys(m.wrappedKeys));
+        return result;
+      })
     );
     const validNew = newDecrypted.filter((m): m is DecryptedMessage => Boolean(m));
+
+    console.debug('[GS:poll] decrypted', validNew.length, '/', newMessages.length);
 
     for (const m of validNew) knownIdsRef.current.add(m.id);
 
@@ -168,14 +180,19 @@ export default function ConversationPage() {
 
   useRealtime(session, async (payload) => {
     const event = payload as { type?: string; conversationId?: string; message?: EncryptedMessage };
+    console.debug('[GS:realtime] event received:', event.type, 'convId:', event.conversationId);
     if (!session) return;
     if (event.type !== 'new_message' || event.conversationId !== conversationId || !event.message) return;
     // Skip if already shown (optimistic display or previous poll)
     if (knownIdsRef.current.has(event.message.id)) return;
+    console.debug('[GS:realtime] new msg', event.message.id, 'wrappedKeys:', Object.keys(event.message.wrappedKeys));
     const decrypted = await decryptForUser(session.userId, event.message, conversationId);
     if (decrypted) {
+      console.debug('[GS:realtime] decrypted OK:', decrypted.id);
       knownIdsRef.current.add(decrypted.id);
       setMessages((prev) => sortAndDedupe([...prev, decrypted]));
+    } else {
+      console.warn('[GS:realtime] FAILED to decrypt msg', event.message.id, '- userId:', session.userId, 'keys:', Object.keys(event.message.wrappedKeys));
     }
   });
 
@@ -215,12 +232,15 @@ export default function ConversationPage() {
     }
 
     // Fallback: existing ECDH/RSA encryption
+    const participantList = detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey, ecdhPublicKey: p.ecdhPublicKey }));
+    console.debug('[GS:send] encrypting for participants:', participantList.map((p) => ({ id: p.id, hasEcdh: !!p.ecdhPublicKey })));
     const encrypted = await encryptForParticipants(
       plaintext,
-      detail.participants.map((p) => ({ id: p.id, publicKey: p.publicKey, ecdhPublicKey: p.ecdhPublicKey })),
+      participantList,
       conversationId,
       s.userId
     );
+    console.debug('[GS:send] wrappedKeys:', Object.keys(encrypted.wrappedKeys), 'hasEphemeral:', !!encrypted.ephemeralPublicKey);
     const sent = await sendMessage(s, conversationId, { ...encrypted });
     return buildSenderMessage(sent, s.userId, plaintext);
   };

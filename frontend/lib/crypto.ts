@@ -192,15 +192,9 @@ async function getPrivateKey(userId: string): Promise<CryptoKey> {
 async function ecdhWrapKey(
   aesKey: CryptoKey,
   recipientEcdhPubBase64: string,
-  conversationId: string
-): Promise<{ wrappedKey: string; ephemeralPublicKey: string }> {
-  // Generate ephemeral ECDH keypair
-  const ephPair = await crypto.subtle.generateKey(
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true,
-    ['deriveBits']
-  );
-
+  conversationId: string,
+  ephPair: CryptoKeyPair
+): Promise<string> {
   // Import recipient ECDH public key
   const recipientPub = await crypto.subtle.importKey(
     'spki',
@@ -229,9 +223,7 @@ async function ecdhWrapKey(
 
   // Wrap the AES message key
   const wrapped = await crypto.subtle.wrapKey('raw', aesKey, wrappingKey, 'AES-KW');
-  const ephPub = await exportPublicKey(ephPair.publicKey);
-
-  return { wrappedKey: toBase64(wrapped), ephemeralPublicKey: ephPub };
+  return toBase64(wrapped);
 }
 
 export async function encryptForParticipants(
@@ -268,13 +260,19 @@ export async function encryptForParticipants(
   const wrappedKeys: Record<string, string> = {};
   let ephemeralPublicKey: string | undefined;
 
+  // Generate a single ephemeral ECDH keypair shared by all participants
+  const needsEcdh = participants.some((p) => p.ecdhPublicKey && conversationId);
+  const ephPair = needsEcdh
+    ? await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])
+    : null;
+  if (ephPair) {
+    ephemeralPublicKey = await exportPublicKey(ephPair.publicKey);
+  }
+
   for (const participant of participants) {
-    if (participant.ecdhPublicKey && conversationId) {
-      // Forward secrecy path: ECDH key wrapping
-      const result = await ecdhWrapKey(aesKey, participant.ecdhPublicKey, conversationId);
-      wrappedKeys[participant.id] = result.wrappedKey;
-      // All participants share the same ephemeral key for simplicity
-      if (!ephemeralPublicKey) ephemeralPublicKey = result.ephemeralPublicKey;
+    if (participant.ecdhPublicKey && conversationId && ephPair) {
+      // Forward secrecy path: ECDH key wrapping (shared ephemeral keypair)
+      wrappedKeys[participant.id] = await ecdhWrapKey(aesKey, participant.ecdhPublicKey, conversationId, ephPair);
     } else {
       // Legacy RSA-OAEP wrapping
       const recipientPub = await importPublicKey(participant.publicKey);
