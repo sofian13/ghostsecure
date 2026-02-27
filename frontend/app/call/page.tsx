@@ -8,7 +8,7 @@ import { createConversation } from '@/lib/api';
 import { getSession } from '@/lib/session';
 import { getSupabaseClient } from '@/lib/supabase';
 
-type VoicePreset = 'normal' | 'ghost' | 'robot' | 'deep' | 'vader' | 'anonymous';
+type VoicePreset = 'normal' | 'ghost' | 'robot' | 'deep' | 'vader' | 'anonymous' | 'grave';
 
 type InviteRow = {
   id: string;
@@ -85,6 +85,7 @@ const VOICE_PRESETS: { value: VoicePreset; label: string; emoji: string }[] = [
   { value: 'deep', label: 'Deep', emoji: '\uD83C\uDF0A' },
   { value: 'vader', label: 'Vader', emoji: '\u2694\uFE0F' },
   { value: 'anonymous', label: 'Anonymous', emoji: '\uD83C\uDFAD' },
+  { value: 'grave', label: 'Grave', emoji: '\uD83D\uDD0A' },
 ];
 
 const ICE_SERVERS = resolveIceServers();
@@ -460,6 +461,49 @@ export default function CallPage() {
       compressor.connect(shaper);
       shaper.connect(tremolo);
       tremolo.connect(destination);
+    } else if (preset === 'grave') {
+      // "Pitch down + formant down" approximation for realtime WebAudio:
+      // subtle low emphasis and high attenuation, no delay/reverb to avoid cave effect.
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = 70;
+
+      const lowShelf = ctx.createBiquadFilter();
+      lowShelf.type = 'lowshelf';
+      lowShelf.frequency.value = 190;
+      lowShelf.gain.value = 7;
+
+      const bodyPeak = ctx.createBiquadFilter();
+      bodyPeak.type = 'peaking';
+      bodyPeak.frequency.value = 260;
+      bodyPeak.Q.value = 0.9;
+      bodyPeak.gain.value = 4;
+
+      const formantShift = ctx.createBiquadFilter();
+      formantShift.type = 'peaking';
+      formantShift.frequency.value = 1700;
+      formantShift.Q.value = 1.1;
+      formantShift.gain.value = -3.5;
+
+      const lowpass = ctx.createBiquadFilter();
+      lowpass.type = 'lowpass';
+      lowpass.frequency.value = 3200;
+      lowpass.Q.value = 0.7;
+
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -22;
+      compressor.knee.value = 10;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.004;
+      compressor.release.value = 0.16;
+
+      source.connect(highpass);
+      highpass.connect(lowShelf);
+      lowShelf.connect(bodyPeak);
+      bodyPeak.connect(formantShift);
+      formantShift.connect(lowpass);
+      lowpass.connect(compressor);
+      compressor.connect(destination);
     } else {
       source.connect(destination);
     }
