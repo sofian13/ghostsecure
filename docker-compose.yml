@@ -1,59 +1,55 @@
 services:
   postgres:
     image: postgres:16
+    profiles: ["dev"]
     environment:
       POSTGRES_DB: ghost_secure
       POSTGRES_USER: ghost
-      POSTGRES_PASSWORD: ghost
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ghost_dev_only}
     volumes:
       - pgdata:/var/lib/postgresql/data
 
   backend:
     build: ./backend
-    depends_on:
-      - postgres
     ports:
       - "8000:8000"
     environment:
-      APP_ENV: ${APP_ENV:-dev}
-      APP_SECRET: ${APP_SECRET:-replace_this_secret}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://ghost:ghost@postgres:5432/ghost_secure?serverVersion=16&charset=utf8}
-      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-http://localhost:3000,https://ghostsecure.vercel.app}
-    command: sh -c "php bin/console doctrine:migrations:migrate --no-interaction && php -S 0.0.0.0:8000 -t public"
+      APP_ENV: ${APP_ENV:-prod}
+      APP_SECRET: ${APP_SECRET:-replace_this_in_production}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ghost:ghost_dev_only@postgres:5432/ghost_secure?serverVersion=16&charset=utf8}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-http://localhost:3000}
+      APP_WS_ALLOW_EMPTY_ORIGIN: ${APP_WS_ALLOW_EMPTY_ORIGIN:-0}
+      APP_SESSION_TTL_SECONDS: ${APP_SESSION_TTL_SECONDS:-43200}
+      APP_MAX_SESSIONS_PER_USER: ${APP_MAX_SESSIONS_PER_USER:-5}
+      APP_AUTH_RATE_LIMIT_LOGIN_MAX: ${APP_AUTH_RATE_LIMIT_LOGIN_MAX:-40}
+      APP_AUTH_RATE_LIMIT_LOGIN_WINDOW: ${APP_AUTH_RATE_LIMIT_LOGIN_WINDOW:-300}
+      APP_AUTH_RATE_LIMIT_LOGIN_USER_MAX: ${APP_AUTH_RATE_LIMIT_LOGIN_USER_MAX:-10}
+      APP_AUTH_RATE_LIMIT_LOGIN_USER_WINDOW: ${APP_AUTH_RATE_LIMIT_LOGIN_USER_WINDOW:-300}
+      APP_AUTH_RATE_LIMIT_REGISTER_MAX: ${APP_AUTH_RATE_LIMIT_REGISTER_MAX:-20}
+      APP_AUTH_RATE_LIMIT_REGISTER_WINDOW: ${APP_AUTH_RATE_LIMIT_REGISTER_WINDOW:-300}
+    command: sh -c "php bin/console doctrine:migrations:migrate --no-interaction && php-fpm -D && caddy run --config /app/docker/Caddyfile --adapter caddyfile"
 
   ws:
     build: ./backend
-    depends_on:
-      - postgres
-      - backend
     ports:
       - "8081:8081"
     environment:
-      APP_ENV: ${APP_ENV:-dev}
-      APP_SECRET: ${APP_SECRET:-replace_this_secret}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://ghost:ghost@postgres:5432/ghost_secure?serverVersion=16&charset=utf8}
-      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-http://localhost:3000,https://ghostsecure.vercel.app}
+      APP_ENV: ${APP_ENV:-prod}
+      APP_SECRET: ${APP_SECRET:-replace_this_in_production}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ghost:ghost_dev_only@postgres:5432/ghost_secure?serverVersion=16&charset=utf8}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-http://localhost:3000}
+      APP_WS_ALLOW_EMPTY_ORIGIN: ${APP_WS_ALLOW_EMPTY_ORIGIN:-0}
     command: php bin/console app:ws-server
 
   frontend:
     build: ./frontend
-    depends_on:
-      - backend
-      - ws
     ports:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
       NEXT_PUBLIC_WS_BASE_URL: ${NEXT_PUBLIC_WS_BASE_URL:-ws://localhost:8081}
-
-  adminer:
-    image: adminer
-    depends_on:
-      - postgres
-    ports:
-      - "8080:8080"
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
 
 volumes:
   pgdata:

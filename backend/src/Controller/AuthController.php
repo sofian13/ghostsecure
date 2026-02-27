@@ -141,11 +141,17 @@ class AuthController
 
     private function extractClientIp(Request $request): string
     {
+        // Behind a reverse proxy (Dokploy/Traefik), use the rightmost non-proxy IP
+        // to prevent spoofing via a crafted X-Forwarded-For header.
         $forwarded = trim((string) $request->headers->get('X-Forwarded-For', ''));
         if ($forwarded !== '') {
-            $parts = array_map(static fn (string $item): string => trim($item), explode(',', $forwarded));
-            if (isset($parts[0]) && $parts[0] !== '') {
-                return $parts[0];
+            $parts = array_values(array_filter(
+                array_map(static fn (string $item): string => trim($item), explode(',', $forwarded))
+            ));
+            // Rightmost entry is the one added by the trusted reverse proxy
+            $rightmost = end($parts);
+            if ($rightmost !== false && $rightmost !== '') {
+                return $rightmost;
             }
         }
 

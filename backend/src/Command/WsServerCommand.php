@@ -21,10 +21,14 @@ class WsServerCommand extends Command implements MessageComponentInterface
     /** @var array<int, array{userId:string,lastAt:string}> */
     private array $meta = [];
 
+    /** @var \SplObjectStorage<ConnectionInterface, true> Connections awaiting auth */
+    private \SplObjectStorage $pending;
+
     public function __construct(private readonly Connection $db)
     {
         parent::__construct();
         $this->clients = new \SplObjectStorage();
+        $this->pending = new \SplObjectStorage();
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -36,6 +40,10 @@ class WsServerCommand extends Command implements MessageComponentInterface
 
         $loop->addPeriodicTimer(1.0, function (): void {
             $this->pollMessages();
+        });
+
+        $loop->addPeriodicTimer(300.0, function (): void {
+            $this->purgeExpiredMessages();
         });
 
         $output->writeln('Ghost Secure WebSocket server listening on :8081');
@@ -55,42 +63,18 @@ class WsServerCommand extends Command implements MessageComponentInterface
             return;
         }
 
-        $query = [];
-        parse_str($conn->httpRequest->getUri()->getQuery(), $query);
-        $token = (string) ($query['token'] ?? '');
-
-        if ($token === '') {
-            $this->wsLog(sprintf('CLOSE id=%s reason=missing_token', (string) $conn->resourceId));
-            $conn->close();
-            return;
-        }
-
-        $row = $this->db->fetchAssociative(
-            'SELECT s.id, u.id as user_id
-             FROM user_session s
-             INNER JOIN app_user u ON u.id = s.user_id
-             WHERE s.token_hash = :hash AND s.expires_at > NOW()
-             LIMIT 1',
-            ['hash' => hash('sha256', $token)]
-        );
-
-        if (!$row || !isset($row['user_id'])) {
-            $this->wsLog(sprintf('CLOSE id=%s reason=invalid_or_expired_token', (string) $conn->resourceId));
-            $conn->close();
-            return;
-        }
-
-        $this->clients->attach($conn);
-        $this->meta[$conn->resourceId] = [
-            'userId' => (string) $row['user_id'],
-            'lastAt' => (new \DateTimeImmutable('-10 seconds'))->format('Y-m-d H:i:sP'),
-        ];
+        $this->pending->attach($conn);
     }
 
     public function onMessage(ConnectionInterface $from, $msg): void
     {
         $payload = json_decode((string) $msg, true);
         if (!is_array($payload)) {
+            return;
+        }
+
+        if ($this->pending->contains($from)) {
+            $this->handleAuth($from, $payload);
             return;
         }
 
@@ -108,6 +92,7 @@ class WsServerCommand extends Command implements MessageComponentInterface
     {
         $this->wsLog(sprintf('CLOSE id=%s', (string) $conn->resourceId));
         $this->clients->detach($conn);
+        $this->pending->detach($conn);
         unset($this->meta[$conn->resourceId]);
     }
 
@@ -116,6 +101,44 @@ class WsServerCommand extends Command implements MessageComponentInterface
         $this->wsLog(sprintf('ERROR id=%s message=%s', (string) $conn->resourceId, $e->getMessage()));
         $conn->close();
         $this->onClose($conn);
+    }
+
+    private function handleAuth(ConnectionInterface $conn, array $payload): void
+    {
+        if (($payload['type'] ?? '') !== 'auth' || empty($payload['token'])) {
+            $conn->send(json_encode(['type' => 'error', 'message' => 'First message must be {"type":"auth","token":"..."}']));
+            $conn->close();
+            $this->pending->detach($conn);
+            return;
+        }
+
+        $token = trim((string) $payload['token']);
+        $row = $this->db->fetchAssociative(
+            'SELECT s.id, u.id as user_id
+             FROM user_session s
+             INNER JOIN app_user u ON u.id = s.user_id
+             WHERE s.token_hash = :hash AND s.expires_at > NOW()
+             LIMIT 1',
+            ['hash' => hash('sha256', $token)]
+        );
+
+        if (!$row || !isset($row['user_id'])) {
+            $this->wsLog(sprintf('CLOSE id=%s reason=invalid_or_expired_token', (string) $conn->resourceId));
+            $conn->send(json_encode(['type' => 'error', 'message' => 'Invalid or expired token']));
+            $conn->close();
+            $this->pending->detach($conn);
+            return;
+        }
+
+        $this->pending->detach($conn);
+        $this->clients->attach($conn);
+        $this->meta[$conn->resourceId] = [
+            'userId' => (string) $row['user_id'],
+            'lastAt' => (new \DateTimeImmutable('-10 seconds'))->format('Y-m-d H:i:sP'),
+        ];
+
+        $conn->send(json_encode(['type' => 'authenticated']));
+        $this->wsLog(sprintf('AUTH id=%s user=%s', (string) $conn->resourceId, $row['user_id']));
     }
 
     private function wsLog(string $message): void
@@ -196,6 +219,18 @@ class WsServerCommand extends Command implements MessageComponentInterface
                 $client->send((string) json_encode($frame));
                 $this->meta[$client->resourceId]['lastAt'] = (string) $row['created_at'];
             }
+        }
+    }
+
+    private function purgeExpiredMessages(): void
+    {
+        try {
+            $deleted = $this->db->executeStatement('DELETE FROM message WHERE expires_at IS NOT NULL AND expires_at < NOW()');
+            if ($deleted > 0) {
+                $this->wsLog(sprintf('PURGE deleted=%d expired messages', $deleted));
+            }
+        } catch (\Throwable $e) {
+            $this->wsLog(sprintf('PURGE error=%s', $e->getMessage()));
         }
     }
 

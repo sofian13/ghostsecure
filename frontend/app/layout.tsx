@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import GhostAmbient from '@/components/GhostAmbient';
 import { Inter } from 'next/font/google';
 
@@ -17,11 +18,14 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const nonce = (await headers()).get('x-nonce') ?? '';
+
   return (
     <html lang="fr">
       <body className={inter.variable}>
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html:
               "try{var t=localStorage.getItem('ghost_theme');document.documentElement.dataset.theme=(t==='light'?'light':'dark')}catch(e){document.documentElement.dataset.theme='dark'}",

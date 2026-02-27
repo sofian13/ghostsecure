@@ -255,23 +255,26 @@ class ConversationController
             return $this->json->error('Forbidden.', 403);
         }
 
+        $limit = min((int) ($request->query->get('limit', 200)), 500);
+
         $conversationRef = $this->em->getReference(Conversation::class, $id);
-        $items = $this->em->createQueryBuilder()
+
+        // Fetch the latest N messages (DESC), then reverse to return ASC order
+        $qb = $this->em->createQueryBuilder()
             ->select('m')
             ->from(Message::class, 'm')
             ->where('m.conversation = :conversation')
+            ->andWhere('m.expiresAt IS NULL OR m.expiresAt > :now')
             ->setParameter('conversation', $conversationRef)
-            ->orderBy('m.createdAt', 'ASC')
-            ->addOrderBy('m.id', 'ASC')
-            ->getQuery()
-            ->getResult();
+            ->setParameter('now', new \DateTimeImmutable())
+            ->orderBy('m.createdAt', 'DESC')
+            ->addOrderBy('m.id', 'DESC')
+            ->setMaxResults($limit);
 
-        $now = new \DateTimeImmutable();
+        $items = array_reverse($qb->getQuery()->getResult());
+
         $serialized = [];
         foreach ($items as $item) {
-            if ($item->getExpiresAt() && $item->getExpiresAt() < $now) {
-                continue;
-            }
             $serialized[] = $this->messageSerializer->serialize($item);
         }
 

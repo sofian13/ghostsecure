@@ -14,7 +14,7 @@ class JsonFactory
         return new JsonResponse($data, $status, [
             'Access-Control-Allow-Origin' => $allowedOrigin,
             'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
-            'Access-Control-Allow-Methods' => 'GET,POST,OPTIONS',
+            'Access-Control-Allow-Methods' => 'GET,POST,DELETE,OPTIONS',
             'Access-Control-Allow-Credentials' => 'false',
             'Vary' => 'Origin',
             'X-Content-Type-Options' => 'nosniff',
@@ -23,7 +23,7 @@ class JsonFactory
             'Strict-Transport-Security' => 'max-age=31536000; includeSubDomains; preload',
             'X-Permitted-Cross-Domain-Policies' => 'none',
             'Cross-Origin-Resource-Policy' => 'same-site',
-            'Permissions-Policy' => 'geolocation=(), camera=(), microphone=()',
+            'Permissions-Policy' => 'geolocation=(), camera=(), microphone=(self)',
             'Cache-Control' => 'no-store, max-age=0',
             'Pragma' => 'no-cache',
         ]);
