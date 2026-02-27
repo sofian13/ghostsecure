@@ -384,7 +384,13 @@ class ConversationController
         }
 
         $ephemeralPublicKey = trim((string) ($payload['ephemeralPublicKey'] ?? ''));
+        if (strlen($ephemeralPublicKey) > 500) {
+            return $this->json->error('ephemeralPublicKey exceeds maximum length.', 422);
+        }
         $ratchetHeader = trim((string) ($payload['ratchetHeader'] ?? ''));
+        if (strlen($ratchetHeader) > 4096) {
+            return $this->json->error('ratchetHeader exceeds maximum length.', 422);
+        }
         // Sealed sender: don't store the sender identity in the database.
         // The sender ID is encrypted inside the message payload (envelope v2/v3).
         $message = new Message(self::uuid(), $conversation, null, $ciphertext, $iv, $wrappedKeys, $expiresAt, $ephemeralPublicKey !== '' ? $ephemeralPublicKey : null, $ratchetHeader !== '' ? $ratchetHeader : null);

@@ -24,11 +24,18 @@ class WsServerCommand extends Command implements MessageComponentInterface
     /** @var \SplObjectStorage<ConnectionInterface, true> Connections awaiting auth */
     private \SplObjectStorage $pending;
 
+    /** @var array<string, int> Number of connections per IP */
+    private array $ipConnections = [];
+
+    /** @var \SplObjectStorage<ConnectionInterface, float> Pending connection open timestamps */
+    private \SplObjectStorage $pendingOpenedAt;
+
     public function __construct(private readonly Connection $db)
     {
         parent::__construct();
         $this->clients = new \SplObjectStorage();
         $this->pending = new \SplObjectStorage();
+        $this->pendingOpenedAt = new \SplObjectStorage();
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -54,6 +61,10 @@ class WsServerCommand extends Command implements MessageComponentInterface
             $this->purgeExpiredSessions();
         });
 
+        $loop->addPeriodicTimer(5.0, function (): void {
+            $this->closeStalePending();
+        });
+
         $output->writeln('Ghost Secure WebSocket server listening on :8081');
         $loop->run();
 
@@ -70,6 +81,16 @@ class WsServerCommand extends Command implements MessageComponentInterface
             $conn->close();
             return;
         }
+
+        // Per-IP connection rate limiting
+        $ip = $this->extractConnIp($conn);
+        $count = $this->ipConnections[$ip] ?? 0;
+        if ($count >= 10) {
+            $this->wsLog(sprintf('CLOSE id=%s reason=ip_connection_limit ip=%s', (string) $conn->resourceId, $ip));
+            $conn->close();
+            return;
+        }
+        $this->ipConnections[$ip] = $count + 1;
 
         // Try cookie-based auth at connection time
         $cookieToken = $this->extractCookieToken($conn);
@@ -97,6 +118,7 @@ class WsServerCommand extends Command implements MessageComponentInterface
         }
 
         $this->pending->attach($conn);
+        $this->pendingOpenedAt->attach($conn, microtime(true));
     }
 
     public function onMessage(ConnectionInterface $from, $msg): void
@@ -132,7 +154,17 @@ class WsServerCommand extends Command implements MessageComponentInterface
         $this->wsLog(sprintf('CLOSE id=%s', (string) $conn->resourceId));
         $this->clients->detach($conn);
         $this->pending->detach($conn);
+        $this->pendingOpenedAt->detach($conn);
         unset($this->meta[$conn->resourceId]);
+
+        // Decrement per-IP counter
+        $ip = $this->extractConnIp($conn);
+        if (isset($this->ipConnections[$ip])) {
+            $this->ipConnections[$ip]--;
+            if ($this->ipConnections[$ip] <= 0) {
+                unset($this->ipConnections[$ip]);
+            }
+        }
     }
 
     public function onError(ConnectionInterface $conn, \Exception $e): void
@@ -170,6 +202,7 @@ class WsServerCommand extends Command implements MessageComponentInterface
         }
 
         $this->pending->detach($conn);
+        $this->pendingOpenedAt->detach($conn);
         $this->clients->attach($conn);
         $this->meta[$conn->resourceId] = [
             'userId' => (string) $row['user_id'],
@@ -386,5 +419,34 @@ class WsServerCommand extends Command implements MessageComponentInterface
         } catch (\Throwable $e) {
             $this->wsLog(sprintf('SESSION_PURGE error=%s', $e->getMessage()));
         }
+    }
+
+    private function closeStalePending(): void
+    {
+        $now = microtime(true);
+        $stale = [];
+        foreach ($this->pendingOpenedAt as $conn) {
+            $openedAt = $this->pendingOpenedAt[$conn];
+            if (($now - $openedAt) > 10.0) {
+                $stale[] = $conn;
+            }
+        }
+        foreach ($stale as $conn) {
+            $this->wsLog(sprintf('CLOSE id=%s reason=pending_auth_timeout', (string) $conn->resourceId));
+            $conn->close();
+            $this->pending->detach($conn);
+            $this->pendingOpenedAt->detach($conn);
+        }
+    }
+
+    private function extractConnIp(ConnectionInterface $conn): string
+    {
+        $remoteAddr = $conn->remoteAddress ?? '';
+        if ($remoteAddr === '') {
+            return 'unknown';
+        }
+        // remoteAddress is typically "ip:port" — extract just the IP
+        $host = parse_url('tcp://' . $remoteAddr, PHP_URL_HOST);
+        return is_string($host) && $host !== '' ? $host : $remoteAddr;
     }
 }

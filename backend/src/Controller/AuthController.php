@@ -63,7 +63,7 @@ class AuthController
 
         $existing = $this->em->getRepository(User::class)->find($userId);
         if ($existing instanceof User) {
-            return $this->json->error('Registration failed.', 409);
+            return $this->json->error('Registration failed.', 422);
         }
 
         if (!$this->validatePublicKey($publicKey)) {

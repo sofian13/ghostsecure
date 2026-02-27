@@ -11,7 +11,7 @@ COPY --from=caddy:2 /usr/bin/caddy /usr/bin/caddy
 WORKDIR /app
 COPY . /app
 
-RUN composer install --no-interaction --optimize-autoloader
+RUN composer install --no-interaction --optimize-autoloader --no-dev
 
 RUN printf '[www]\nclear_env = no\n' > /usr/local/etc/php-fpm.d/zzz-clear-env.conf
 

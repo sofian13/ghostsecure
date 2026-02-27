@@ -65,6 +65,6 @@ class JsonFactory
             return $origin;
         }
 
-        return 'null';
+        return $allowed[0] ?? 'http://localhost:3000';
     }
 }

@@ -30,13 +30,21 @@ async function exportPrivateKeyJwk(key: CryptoKey): Promise<JsonWebKey> {
 }
 
 async function importPublicKey(spkiBase64: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
+  const key = await crypto.subtle.importKey(
     'spki',
     fromBase64(spkiBase64),
     { name: 'RSA-OAEP', hash: 'SHA-256' },
     true,
     ['wrapKey']
   );
+
+  // Validate RSA key size: 4096-bit modulus = 512 bytes = 683+ base64url chars
+  const jwk = await crypto.subtle.exportKey('jwk', key);
+  if (!jwk.n || jwk.n.length < 683) {
+    throw new Error('RSA key too weak: modulus must be at least 4096 bits');
+  }
+
+  return key;
 }
 
 async function importPrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
