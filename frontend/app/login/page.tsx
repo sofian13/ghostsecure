@@ -54,9 +54,9 @@ export default function LoginPage() {
       } else if (message.includes('invalid api key') || message.includes('jwt')) {
         setError('Cle Supabase invalide. Verifie NEXT_PUBLIC_SUPABASE_ANON_KEY.');
       } else if (message.includes('missing env')) {
-        setError('Variables manquantes. Verifie NEXT_PUBLIC_SUPABASE_URL et NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+        setError('Variables manquantes. Verifie NEXT_PUBLIC_API_BASE_URL.');
       } else if (message.includes('failed to fetch')) {
-        setError('Supabase indisponible. Verifiez NEXT_PUBLIC_SUPABASE_URL et NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+        setError(`API backend indisponible. Detail: ${raw}`);
       } else {
         setError(`Impossible de continuer: ${raw}`);
       }
