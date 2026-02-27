@@ -15,6 +15,8 @@ RUN composer install --no-interaction --optimize-autoloader
 
 RUN printf '[www]\nclear_env = no\n' > /usr/local/etc/php-fpm.d/zzz-clear-env.conf
 
+RUN chown -R www-data:www-data /app/var
+
 EXPOSE 8000
 
 CMD ["sh", "-c", "php-fpm -D && caddy run --config /app/docker/Caddyfile --adapter caddyfile"]
