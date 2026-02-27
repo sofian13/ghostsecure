@@ -52,13 +52,13 @@ async function importPrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
 async function signRegistrationProof(userId: string, privateKeyJwk: JsonWebKey): Promise<string> {
   const signingKey = await crypto.subtle.importKey(
     'jwk',
-    { ...privateKeyJwk, alg: 'PS256', key_ops: ['sign'] },
-    { name: 'RSA-PSS', hash: 'SHA-256' },
+    { ...privateKeyJwk, alg: 'RS256', key_ops: ['sign'] },
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
     false,
     ['sign']
   );
   const signature = await crypto.subtle.sign(
-    { name: 'RSA-PSS', saltLength: 32 },
+    'RSASSA-PKCS1-v1_5',
     signingKey,
     new TextEncoder().encode(userId)
   );
