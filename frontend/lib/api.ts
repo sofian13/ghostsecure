@@ -73,6 +73,7 @@ function toFriendRequest(row: FriendRequestRow): FriendRequest {
 
 async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Session): Promise<T> {
   const baseUrl = resolveApiBaseUrl();
+  const requestUrl = `${baseUrl}${path}`;
 
   const headers = new Headers(init.headers ?? {});
   headers.set('Accept', 'application/json');
@@ -83,17 +84,35 @@ async function apiRequest<T>(path: string, init: RequestInit = {}, session?: Ses
     headers.set('Authorization', `Bearer ${session.token}`);
   }
 
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(requestUrl, {
+      ...init,
+      headers,
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'unknown network error';
+    throw new Error(
+      `Network error calling ${requestUrl}: ${reason}. Verify API URL, backend availability, APP_ALLOWED_ORIGINS and CSP connect-src.`
+    );
+  }
 
   const text = await response.text();
-  const parsed = text ? (JSON.parse(text) as T | ApiError) : ({} as T);
+  let parsed: T | ApiError = {} as T;
+  if (text) {
+    try {
+      parsed = JSON.parse(text) as T | ApiError;
+    } catch {
+      const sample = text.slice(0, 180);
+      throw new Error(
+        `Invalid JSON response from ${requestUrl} (${response.status} ${response.statusText}). Body starts with: ${sample}`
+      );
+    }
+  }
 
   if (!response.ok) {
     const message = (parsed as ApiError)?.error ?? `Request failed (${response.status})`;
-    throw new Error(message);
+    throw new Error(`${message} [${response.status} ${response.statusText}] (${requestUrl})`);
   }
 
   return parsed as T;

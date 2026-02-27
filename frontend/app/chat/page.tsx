@@ -340,10 +340,12 @@ export default function ChatListPage() {
 
 function normalizeError(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
-  const message = err.message.toLowerCase();
+  const raw = err.message.trim();
+  const message = raw.toLowerCase();
   if (message.includes('forbidden')) return 'Action non autorisee.';
-  if (message.includes('invalid') || message.includes('introuvable')) return err.message;
-  if (message.includes('failed to fetch')) return 'Connexion backend indisponible. Verifiez API, reseau et serveur.';
+  if (message.includes('invalid') || message.includes('introuvable')) return raw;
+  if (message.includes('network error calling')) return raw;
+  if (message.includes('failed to fetch')) return `Connexion backend indisponible. Detail: ${raw}`;
   return fallback;
 }
 
