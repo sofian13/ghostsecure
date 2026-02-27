@@ -74,16 +74,15 @@ export async function ensureIdentity(userId: string): Promise<{ publicKey: strin
   const stored = await idbGet<CryptoKey | JsonWebKey>(keyId);
 
   if (stored) {
-    // Already a non-extractable CryptoKey — use directly
+    // Already a non-extractable CryptoKey — can't export the public key.
+    // Delete it and fall through to generate a fresh keypair so the caller
+    // always receives a usable publicKey (needed for registration).
     if (stored instanceof CryptoKey) {
-      // We can't derive the public key from a non-extractable CryptoKey,
-      // but it's already been registered. The caller re-fetches from the server.
-      // Return empty publicKey — the caller should use the server-side value.
-      return { publicKey: '' };
-    }
-
-    // Legacy JWK — validate and migrate to non-extractable CryptoKey
-    if (isJsonWebKey(stored)) {
+      await idbDelete(keyId);
+      await idbDelete(`ecdh-private:${userId}`);
+      // Fall through to key generation below
+    } else if (isJsonWebKey(stored)) {
+      // Legacy JWK — validate and migrate to non-extractable CryptoKey
       const jwk = stored;
       if (
         jwk.kty !== 'RSA' ||
@@ -100,9 +99,9 @@ export async function ensureIdentity(userId: string): Promise<{ publicKey: strin
       );
       await idbSet(keyId, nonExtractableKey);
       return { publicKey };
+    } else {
+      throw new Error('Invalid key material');
     }
-
-    throw new Error('Invalid key material');
   }
 
   const keyPair = await crypto.subtle.generateKey(
