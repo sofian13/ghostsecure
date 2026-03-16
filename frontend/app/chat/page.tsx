@@ -294,6 +294,14 @@ export default function ChatListPage() {
           </section>
         )}
 
+        <section className="chat-section-head" aria-label="Resume conversations">
+          <div>
+            <p className="section-title">Conversations</p>
+            <strong>{filteredConversations.length} discussion{filteredConversations.length > 1 ? 's' : ''}</strong>
+          </div>
+          {search.trim() && <span className="chat-filter-pill">Filtre actif</span>}
+        </section>
+
         <section className="chat-list" aria-label="Conversations">
           {loading && (
             <>
@@ -336,6 +344,9 @@ export default function ChatListPage() {
                     </div>
                     <div className="chat-bottomline">
                       <p>{isGroup ? `Groupe - ${conv.memberCount} membres` : preview?.text ?? 'Message chiffre'}</p>
+                      <span className={`chat-kind-pill ${isGroup ? 'group' : 'direct'}`}>
+                        {isGroup ? `${conv.memberCount} membres` : 'Prive'}
+                      </span>
                     </div>
                   </div>
                 </button>

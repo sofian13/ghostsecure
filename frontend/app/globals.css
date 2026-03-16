@@ -625,6 +625,7 @@ select {
 .message-thread {
   display: grid;
   gap: var(--sp-2);
+  align-content: start;
 }
 
 .request-row,
@@ -690,7 +691,7 @@ select {
   min-width: 0;
   flex: 1;
   display: grid;
-  gap: 2px;
+  gap: 6px;
 }
 
 .chat-topline {
@@ -712,6 +713,52 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.chat-bottomline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.chat-bottomline p {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-kind-pill,
+.chat-filter-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(133, 172, 224, 0.18);
+  color: color-mix(in oklab, var(--text) 82%, var(--muted));
+  background: rgba(55, 78, 111, 0.22);
+}
+
+.chat-kind-pill.group {
+  background: rgba(100, 118, 255, 0.14);
+  border-color: rgba(136, 147, 255, 0.26);
+}
+
+.chat-kind-pill.direct {
+  background: rgba(83, 184, 255, 0.1);
+  border-color: rgba(83, 184, 255, 0.22);
+}
+
+.chat-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-1);
 }
 
 /* ===== SKELETON ===== */
@@ -1588,11 +1635,42 @@ select {
 }
 
 .mobile-chats .chat-row {
-  min-height: 74px;
-  border-radius: 22px;
+  width: 100%;
+  min-height: 0;
+  padding: 14px 16px;
+  border-radius: 20px;
+  align-items: flex-start;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 45%),
-    var(--card-soft);
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), transparent 42%),
+    linear-gradient(180deg, rgba(22, 33, 49, 0.96), rgba(18, 27, 40, 0.92));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 14px 26px rgba(2, 9, 20, 0.16);
+}
+
+.mobile-chats .chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mobile-chats .chat-content {
+  padding-top: 1px;
+}
+
+.mobile-chats .chat-topline strong {
+  font-size: 0.98rem;
+  line-height: 1.2;
+}
+
+.mobile-chats .chat-topline span {
+  padding-top: 2px;
+}
+
+.mobile-chats .chat-avatar {
+  width: 44px;
+  height: 44px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .mobile-chats .sticky-search {
