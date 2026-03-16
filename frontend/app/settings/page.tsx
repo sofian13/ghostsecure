@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
 import { deleteAccount, logoutAllDevices, logoutUser } from '@/lib/api';
 import { wipeLocalKeys } from '@/lib/crypto';
-import { describeDisappearingTimer, getGhostPreferences, subscribeGhostPreferences, updateGhostPreferences } from '@/lib/preferences';
+import { describeDisappearingTimer, updateGhostPreferences, useGhostPreferences } from '@/lib/preferences';
 import { clearSession, getSession } from '@/lib/session';
 
 type ThemeMode = 'dark' | 'light';
@@ -27,10 +27,12 @@ const DISAPPEARING_OPTIONS: Array<{ value: 0 | 1800 | 3600 | 86400 | 604800; lab
 
 export default function SettingsPage() {
   const router = useRouter();
-  const preferences = useSyncExternalStore(subscribeGhostPreferences, getGhostPreferences, getGhostPreferences);
+  const preferences = useGhostPreferences();
   const [userId, setUserId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [saved, setSaved] = useState<string | null>(null);
+  const [draftVoiceMaskAmount, setDraftVoiceMaskAmount] = useState(preferences.callVoiceMaskAmount);
+  const savedTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const session = getSession();
@@ -47,9 +49,21 @@ export default function SettingsPage() {
   }, [router]);
 
   const flashSaved = (message: string) => {
+    if (savedTimerRef.current) window.clearTimeout(savedTimerRef.current);
     setSaved(message);
-    window.setTimeout(() => setSaved(null), 1800);
+    savedTimerRef.current = window.setTimeout(() => {
+      setSaved(null);
+      savedTimerRef.current = null;
+    }, 1800);
   };
+
+  useEffect(() => {
+    setDraftVoiceMaskAmount(preferences.callVoiceMaskAmount);
+  }, [preferences.callVoiceMaskAmount]);
+
+  useEffect(() => () => {
+    if (savedTimerRef.current) window.clearTimeout(savedTimerRef.current);
+  }, []);
 
   const onSwitchTheme = () => {
     const next: ThemeMode = theme === 'dark' ? 'light' : 'dark';
@@ -62,6 +76,11 @@ export default function SettingsPage() {
   const updatePreference = <K extends keyof typeof preferences>(key: K, value: (typeof preferences)[K], message: string) => {
     updateGhostPreferences({ [key]: value });
     flashSaved(message);
+  };
+
+  const commitVoiceMaskAmount = () => {
+    if (draftVoiceMaskAmount === preferences.callVoiceMaskAmount) return;
+    updatePreference('callVoiceMaskAmount', draftVoiceMaskAmount, 'Voix masquee ajustee');
   };
 
   if (!userId) return <main className="centered">Chargement...</main>;
@@ -177,15 +196,19 @@ export default function SettingsPage() {
           </div>
           <p className="muted-text">Votre voix reste claire, mais plus difficile a reconnaitre.</p>
           <label className="field">
-            <span>Niveau de masquage: {preferences.callVoiceMaskAmount}%</span>
+            <span>Niveau de masquage: {draftVoiceMaskAmount}%</span>
             <input
               className="settings-range"
               type="range"
               min="35"
               max="85"
               step="1"
-              value={preferences.callVoiceMaskAmount}
-              onChange={(e) => updatePreference('callVoiceMaskAmount', Number(e.target.value), 'Voix masquee ajustee')}
+              value={draftVoiceMaskAmount}
+              onChange={(e) => setDraftVoiceMaskAmount(Number(e.target.value))}
+              onMouseUp={commitVoiceMaskAmount}
+              onTouchEnd={commitVoiceMaskAmount}
+              onKeyUp={commitVoiceMaskAmount}
+              onBlur={commitVoiceMaskAmount}
             />
           </label>
           <div className="settings-range-legend">

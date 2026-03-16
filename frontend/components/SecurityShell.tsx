@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase';
-import { getGhostPreferences, subscribeGhostPreferences } from '@/lib/preferences';
+import { useGhostPreferences } from '@/lib/preferences';
 
 type Props = {
   userId: string;
@@ -10,7 +10,7 @@ type Props = {
 };
 
 export default function SecurityShell({ userId, children }: Props) {
-  const preferences = useSyncExternalStore(subscribeGhostPreferences, getGhostPreferences, getGhostPreferences);
+  const preferences = useGhostPreferences();
   const [hidden, setHidden] = useState(false);
   const [manualLock, setManualLock] = useState(false);
   const [captureAlert, setCaptureAlert] = useState(false);

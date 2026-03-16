@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
@@ -8,7 +8,7 @@ import { getSession } from '@/lib/session';
 import { addGroupMember, fetchConversationDetail, fetchMessages, fetchPreKeyBundle, leaveGroupConversation, sendMessage } from '@/lib/api';
 import { encryptForParticipants } from '@/lib/crypto';
 import { decryptForUser, type DecryptedMessage } from '@/lib/messages';
-import { describeDisappearingTimer, getGhostPreferences, subscribeGhostPreferences } from '@/lib/preferences';
+import { describeDisappearingTimer, useGhostPreferences } from '@/lib/preferences';
 import { hasRatchetSession, createOutboundSession, encryptRatchet } from '@/lib/ratchet';
 import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
@@ -21,7 +21,7 @@ export default function ConversationPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const preferences = useSyncExternalStore(subscribeGhostPreferences, getGhostPreferences, getGhostPreferences);
+  const preferences = useGhostPreferences();
   const conversationId = decodeURIComponent(params.id);
 
   const [session, setSessionState] = useState<Session | null>(null);

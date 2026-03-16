@@ -6,7 +6,7 @@ import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
 import { createConversation } from '@/lib/api';
 import { callSession, type IncomingOffer, type InviteRow } from '@/lib/callSession';
-import { getGhostPreferences, subscribeGhostPreferences } from '@/lib/preferences';
+import { useGhostPreferences } from '@/lib/preferences';
 import { getSession } from '@/lib/session';
 import { getSupabaseClient } from '@/lib/supabase';
 
@@ -19,7 +19,7 @@ function normalizeUserId(value: string | null | undefined): string {
 export default function CallPage() {
   const router = useRouter();
   const live = useSyncExternalStore(callSession.subscribe, callSession.getSnapshot, callSession.getSnapshot);
-  const preferences = useSyncExternalStore(subscribeGhostPreferences, getGhostPreferences, getGhostPreferences);
+  const preferences = useGhostPreferences();
   const [userId, setUserId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState('');
   const [autoCall, setAutoCall] = useState(false);

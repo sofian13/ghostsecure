@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from 'react';
+
 export type GhostPreferences = {
   hideMessagePreviews: boolean;
   hideCallerIdentity: boolean;
@@ -19,6 +21,9 @@ const DEFAULTS: GhostPreferences = {
   disappearingTimerSeconds: 3600,
   callVoiceMaskAmount: 58,
 };
+
+let cachedPreferences: GhostPreferences = DEFAULTS;
+let hydrated = false;
 
 function clampMaskAmount(value: unknown): number {
   const numeric = typeof value === 'number' ? value : Number(value);
@@ -44,19 +49,36 @@ function normalizePreferences(value: unknown): GhostPreferences {
   };
 }
 
-export function getGhostPreferences(): GhostPreferences {
-  if (typeof window === 'undefined') return DEFAULTS;
+function refreshCachedPreferences(): GhostPreferences {
+  if (typeof window === 'undefined') return cachedPreferences;
   try {
     const raw = window.localStorage.getItem(KEY);
-    if (!raw) return DEFAULTS;
-    return normalizePreferences(JSON.parse(raw));
+    cachedPreferences = raw ? normalizePreferences(JSON.parse(raw)) : DEFAULTS;
   } catch {
-    return DEFAULTS;
+    cachedPreferences = DEFAULTS;
   }
+  hydrated = true;
+  return cachedPreferences;
+}
+
+export function getGhostPreferences(): GhostPreferences {
+  if (typeof window === 'undefined') return cachedPreferences;
+  if (hydrated) return cachedPreferences;
+  return refreshCachedPreferences();
 }
 
 export function updateGhostPreferences(patch: Partial<GhostPreferences>): GhostPreferences {
   const next = normalizePreferences({ ...getGhostPreferences(), ...patch });
+  const unchanged =
+    next.hideMessagePreviews === cachedPreferences.hideMessagePreviews
+    && next.hideCallerIdentity === cachedPreferences.hideCallerIdentity
+    && next.keepScreenAwake === cachedPreferences.keepScreenAwake
+    && next.autoLockDelaySeconds === cachedPreferences.autoLockDelaySeconds
+    && next.disappearingTimerSeconds === cachedPreferences.disappearingTimerSeconds
+    && next.callVoiceMaskAmount === cachedPreferences.callVoiceMaskAmount;
+  if (unchanged) return cachedPreferences;
+  cachedPreferences = next;
+  hydrated = true;
   window.localStorage.setItem(KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent('ghost-preferences-change'));
   return next;
@@ -65,15 +87,28 @@ export function updateGhostPreferences(patch: Partial<GhostPreferences>): GhostP
 export function subscribeGhostPreferences(listener: () => void): () => void {
   if (typeof window === 'undefined') return () => undefined;
   const onStorage = (event: StorageEvent) => {
-    if (event.key === KEY) listener();
+    if (event.key !== KEY) return;
+    refreshCachedPreferences();
+    listener();
   };
-  const onCustom = () => listener();
+  const onCustom = () => {
+    refreshCachedPreferences();
+    listener();
+  };
   window.addEventListener('storage', onStorage);
   window.addEventListener('ghost-preferences-change', onCustom);
   return () => {
     window.removeEventListener('storage', onStorage);
     window.removeEventListener('ghost-preferences-change', onCustom);
   };
+}
+
+export function useGhostPreferences(): GhostPreferences {
+  const [preferences, setPreferences] = useState<GhostPreferences>(() => getGhostPreferences());
+
+  useEffect(() => subscribeGhostPreferences(() => setPreferences(getGhostPreferences())), []);
+
+  return preferences;
 }
 
 export function describeDisappearingTimer(value: GhostPreferences['disappearingTimerSeconds']): string {
@@ -83,4 +118,3 @@ export function describeDisappearingTimer(value: GhostPreferences['disappearingT
   if (value === 86400) return '24 heures';
   return '7 jours';
 }
-

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
@@ -15,7 +15,7 @@ import {
   type FriendRequest,
 } from '@/lib/api';
 import { decryptForUser, previewLabel } from '@/lib/messages';
-import { describeDisappearingTimer, getGhostPreferences, subscribeGhostPreferences } from '@/lib/preferences';
+import { describeDisappearingTimer, useGhostPreferences } from '@/lib/preferences';
 import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
 import type { Conversation, Session } from '@/types';
@@ -25,9 +25,12 @@ type ConversationPreview = {
   at: string;
 };
 
+const PREVIEW_FETCH_LIMIT = 8;
+const MIN_REFRESH_GAP_MS = 1200;
+
 export default function ChatListPage() {
   const router = useRouter();
-  const preferences = useSyncExternalStore(subscribeGhostPreferences, getGhostPreferences, getGhostPreferences);
+  const preferences = useGhostPreferences();
   const [session, setSessionState] = useState<Session | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
@@ -41,6 +44,14 @@ export default function ChatListPage() {
   const [loading, setLoading] = useState(true);
   const [friendStatus, setFriendStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const previewsRef = useRef<Record<string, ConversationPreview>>({});
+  const loadPromiseRef = useRef<Promise<void> | null>(null);
+  const queuedRefreshRef = useRef(false);
+  const lastRefreshAtRef = useRef(0);
+
+  useEffect(() => {
+    previewsRef.current = previews;
+  }, [previews]);
 
   useEffect(() => {
     const s = getSession();
@@ -55,8 +66,17 @@ export default function ChatListPage() {
     const rows = await fetchConversations(s);
     setConversations(rows);
 
+    const next: Record<string, ConversationPreview> = {};
+
+    for (const conv of rows.slice(PREVIEW_FETCH_LIMIT)) {
+      next[conv.id] = previewsRef.current[conv.id] ?? {
+        text: conv.kind === 'group' ? `Groupe - ${conv.memberCount} membres` : 'Conversation securisee',
+        at: conv.updatedAt,
+      };
+    }
+
     const resolved = await Promise.all(
-      rows.map(async (conv) => {
+      rows.slice(0, PREVIEW_FETCH_LIMIT).map(async (conv) => {
         try {
           const encrypted = await fetchMessages(s, conv.id, 1);
           const last = encrypted[encrypted.length - 1];
@@ -71,10 +91,35 @@ export default function ChatListPage() {
       })
     );
 
-    const next: Record<string, ConversationPreview> = {};
     for (const [id, value] of resolved) next[id] = value;
     setPreviews(next);
   };
+
+  async function refreshConversations(s: Session): Promise<void> {
+    if (loadPromiseRef.current) {
+      queuedRefreshRef.current = true;
+      return loadPromiseRef.current;
+    }
+
+    const waitMs = Math.max(0, MIN_REFRESH_GAP_MS - (Date.now() - lastRefreshAtRef.current));
+    loadPromiseRef.current = (async () => {
+      try {
+        if (waitMs > 0) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, waitMs));
+        }
+        lastRefreshAtRef.current = Date.now();
+        await loadConversationsAndPreview(s);
+      } finally {
+        loadPromiseRef.current = null;
+        if (queuedRefreshRef.current) {
+          queuedRefreshRef.current = false;
+          await refreshConversations(s);
+        }
+      }
+    })();
+
+    return loadPromiseRef.current;
+  }
 
   const loadFriendRequests = async (s: Session) => {
     const requests = await fetchIncomingFriendRequests(s);
@@ -84,7 +129,7 @@ export default function ChatListPage() {
   useEffect(() => {
     if (!session) return;
     setLoading(true);
-    Promise.all([loadConversationsAndPreview(session), loadFriendRequests(session)])
+    Promise.all([refreshConversations(session), loadFriendRequests(session)])
       .catch((err: unknown) => setError(normalizeError(err, 'Erreur chargement')))
       .finally(() => setLoading(false));
   }, [preferences.hideMessagePreviews, session]);
@@ -92,7 +137,7 @@ export default function ChatListPage() {
   useEffect(() => {
     if (!session) return;
     const id = window.setInterval(() => {
-      void loadConversationsAndPreview(session).catch(() => null);
+      void refreshConversations(session).catch(() => null);
     }, 20000);
     return () => window.clearInterval(id);
   }, [preferences.hideMessagePreviews, session]);
@@ -104,10 +149,10 @@ export default function ChatListPage() {
       .channel(`chat-list:${session.userId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_request' }, async () => {
         await loadFriendRequests(session);
-        await loadConversationsAndPreview(session);
+        await refreshConversations(session);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message' }, async () => {
-        await loadConversationsAndPreview(session);
+        await refreshConversations(session);
       })
       .subscribe();
 
@@ -118,7 +163,7 @@ export default function ChatListPage() {
 
   useRealtime(session, async () => {
     if (!session) return;
-    await loadConversationsAndPreview(session);
+    await refreshConversations(session);
   });
 
   const onSendFriendRequest = async (e: FormEvent) => {
@@ -135,7 +180,7 @@ export default function ChatListPage() {
         setGroupTitle('');
         setGroupMembers('');
         setSheetOpen(false);
-        await loadConversationsAndPreview(session);
+        await refreshConversations(session);
         router.push(`/chat/${encodeURIComponent(conv.id)}`);
         return;
       }
@@ -146,7 +191,7 @@ export default function ChatListPage() {
       setPeerUserId('');
       setSheetMode('direct');
       setSheetOpen(false);
-      await loadConversationsAndPreview(session);
+      await refreshConversations(session);
       await loadFriendRequests(session);
     } catch (err) {
       setError(normalizeError(err, "Erreur envoi demande d'ami"));
@@ -157,7 +202,7 @@ export default function ChatListPage() {
     if (!session) return;
     try {
       const conv = await acceptFriendRequest(session, requestId);
-      await loadConversationsAndPreview(session);
+      await refreshConversations(session);
       await loadFriendRequests(session);
       router.push(`/chat/${encodeURIComponent(conv.id)}`);
     } catch (err) {

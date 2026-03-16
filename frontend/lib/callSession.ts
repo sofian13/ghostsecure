@@ -138,11 +138,13 @@ class CallSessionManager {
   setTarget(targetId: string) {
     const nextTarget = normalizeUserId(targetId);
     if (this.state.callActive && this.state.targetId && nextTarget && this.state.targetId !== nextTarget) return;
+    if (this.state.targetId === nextTarget) return;
     this.setState({ targetId: nextTarget });
   }
 
   async setVoiceMaskAmount(amount: number) {
     const nextAmount = clampMaskAmount(amount);
+    if (this.state.voiceMaskAmount === nextAmount) return;
     this.setState({ voiceMaskAmount: nextAmount });
     if (!this.pc || !this.localStream) return;
     await this.replaceOutgoingTrack(nextAmount);
@@ -310,6 +312,10 @@ class CallSessionManager {
   }
 
   private setState(patch: Partial<CallSessionSnapshot>) {
+    const entries = Object.entries(patch) as Array<[keyof CallSessionSnapshot, CallSessionSnapshot[keyof CallSessionSnapshot]]>;
+    if (entries.length === 0) return;
+    const hasChange = entries.some(([key, value]) => this.state[key] !== value);
+    if (!hasChange) return;
     this.state = { ...this.state, ...patch };
     this.listeners.forEach((listener) => listener());
   }
@@ -626,4 +632,3 @@ class CallSessionManager {
 }
 
 export const callSession = new CallSessionManager();
-
