@@ -1742,6 +1742,25 @@ select {
   background: transparent;
 }
 
+.mobile-chats {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.mobile-chats .chat-list-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-chats .chat-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .mobile-chats .search-wrap {
   border: 1px solid rgba(152, 180, 210, 0.14);
   border-radius: 18px;
