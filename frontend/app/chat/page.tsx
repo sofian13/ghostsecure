@@ -237,30 +237,21 @@ export default function ChatListPage() {
   return (
     <SecurityShell userId={session.userId}>
       <main className="mobile-screen mobile-chats">
-        <header className="mobile-header">
+        <header className="mobile-header whatsapp-header">
           <div>
             <h1>Ghost Secure</h1>
-            <p className="muted-text">Messagerie privee renforcee</p>
+            <p className="muted-text">Discussions</p>
           </div>
           <button type="button" className="icon-btn" onClick={() => router.push('/settings')} aria-label="Parametres">
             <SettingsGearIcon />
           </button>
         </header>
 
-        <section className="inline-card secure-overview">
-          <div className="secure-overview-head">
-            <div>
-              <p className="section-title">Protection active</p>
-              <strong>Style Signal, sans fuite visible</strong>
-            </div>
-            <span className="secure-badge">Prive</span>
-          </div>
-          <div className="secure-chip-row">
-            <span className="secure-chip">E2E</span>
-            <span className="secure-chip">Sealed sender</span>
-            <span className="secure-chip">{preferences.hideMessagePreviews ? 'Apercus masques' : 'Apercus visibles'}</span>
-            <span className="secure-chip">Disparition {describeDisappearingTimer(preferences.disappearingTimerSeconds)}</span>
-          </div>
+        <section className="chat-top-strip" aria-label="Etat securite">
+          <span className="chat-top-pill strong">Prive</span>
+          <span className="chat-top-pill">E2E</span>
+          <span className="chat-top-pill">{preferences.hideMessagePreviews ? 'Apercus masques' : 'Apercus visibles'}</span>
+          <span className="chat-top-pill">Disparition {describeDisappearingTimer(preferences.disappearingTimerSeconds)}</span>
         </section>
 
         <div className="sticky-search">
@@ -294,15 +285,16 @@ export default function ChatListPage() {
           </section>
         )}
 
-        <section className="chat-section-head" aria-label="Resume conversations">
+        <section className="chat-section-head whatsapp-section-head" aria-label="Resume conversations">
           <div>
-            <p className="section-title">Conversations</p>
-            <strong>{filteredConversations.length} discussion{filteredConversations.length > 1 ? 's' : ''}</strong>
+            <p className="section-title">Recents</p>
+            <strong>{filteredConversations.length} chat{filteredConversations.length > 1 ? 's' : ''}</strong>
           </div>
           {search.trim() && <span className="chat-filter-pill">Filtre actif</span>}
         </section>
 
-        <section className="chat-list" aria-label="Conversations">
+        <section className="chat-list-shell" aria-label="Conversations">
+          <div className="chat-list">
           {loading && (
             <>
               <div className="chat-skeleton" />
@@ -332,26 +324,30 @@ export default function ChatListPage() {
                   className="chat-row"
                   onClick={() => router.push(`/chat/${encodeURIComponent(conv.id)}`)}
                 >
-                  {isGroup ? (
-                    <div className="chat-avatar group-avatar" aria-hidden="true"><GroupIcon /></div>
+                  <div className="chat-row-avatar-wrap">
+                    {isGroup ? (
+                      <div className="chat-avatar group-avatar" aria-hidden="true"><GroupIcon /></div>
                   ) : (
-                    <div className="chat-avatar" aria-hidden="true">{conv.peerId.slice(0, 1).toUpperCase()}</div>
-                  )}
+                      <div className="chat-avatar" aria-hidden="true">{conv.peerId.slice(0, 1).toUpperCase()}</div>
+                    )}
+                    <span className={`chat-presence-dot ${isGroup ? 'group' : 'direct'}`} aria-hidden="true" />
+                  </div>
                   <div className="chat-content">
                     <div className="chat-topline">
                       <strong>{isGroup ? (conv.title ?? 'Groupe') : conv.peerId}</strong>
                       <span>{formatHour(preview?.at ?? conv.updatedAt)}</span>
                     </div>
                     <div className="chat-bottomline">
-                      <p>{isGroup ? `Groupe - ${conv.memberCount} membres` : preview?.text ?? 'Message chiffre'}</p>
+                      <p>{isGroup ? `Groupe · ${conv.memberCount} membres` : preview?.text ?? 'Message chiffre'}</p>
                       <span className={`chat-kind-pill ${isGroup ? 'group' : 'direct'}`}>
-                        {isGroup ? `${conv.memberCount} membres` : 'Prive'}
+                        {isGroup ? 'Groupe' : 'Prive'}
                       </span>
                     </div>
                   </div>
                 </button>
               );
             })}
+          </div>
         </section>
 
         <button type="button" className="fab" onClick={() => setSheetOpen(true)} aria-label="Nouveau chat">
