@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
@@ -15,6 +15,7 @@ import {
   type FriendRequest,
 } from '@/lib/api';
 import { decryptForUser, previewLabel } from '@/lib/messages';
+import { describeDisappearingTimer, getGhostPreferences, subscribeGhostPreferences } from '@/lib/preferences';
 import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
 import type { Conversation, Session } from '@/types';
@@ -26,6 +27,7 @@ type ConversationPreview = {
 
 export default function ChatListPage() {
   const router = useRouter();
+  const preferences = useSyncExternalStore(subscribeGhostPreferences, getGhostPreferences, getGhostPreferences);
   const [session, setSessionState] = useState<Session | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
@@ -62,7 +64,7 @@ export default function ChatListPage() {
             return [conv.id, { text: 'Nouveau chat securise', at: conv.updatedAt }] as const;
           }
           const dec = await decryptForUser(s.userId, last, conv.id);
-          return [conv.id, { text: previewLabel(dec), at: last.createdAt }] as const;
+          return [conv.id, { text: preferences.hideMessagePreviews ? 'Apercu masque' : previewLabel(dec), at: last.createdAt }] as const;
         } catch {
           return [conv.id, { text: 'Message chiffre', at: conv.updatedAt }] as const;
         }
@@ -85,7 +87,7 @@ export default function ChatListPage() {
     Promise.all([loadConversationsAndPreview(session), loadFriendRequests(session)])
       .catch((err: unknown) => setError(normalizeError(err, 'Erreur chargement')))
       .finally(() => setLoading(false));
-  }, [session]);
+  }, [preferences.hideMessagePreviews, session]);
 
   useEffect(() => {
     if (!session) return;
@@ -93,7 +95,7 @@ export default function ChatListPage() {
       void loadConversationsAndPreview(session).catch(() => null);
     }, 20000);
     return () => window.clearInterval(id);
-  }, [session]);
+  }, [preferences.hideMessagePreviews, session]);
 
   useEffect(() => {
     if (!session) return;
@@ -112,7 +114,7 @@ export default function ChatListPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [session?.userId]);
+  }, [preferences.hideMessagePreviews, session?.userId]);
 
   useRealtime(session, async () => {
     if (!session) return;
@@ -193,12 +195,28 @@ export default function ChatListPage() {
         <header className="mobile-header">
           <div>
             <h1>Ghost Secure</h1>
-            <p className="muted-text">Chats chiffres</p>
+            <p className="muted-text">Messagerie privee renforcee</p>
           </div>
           <button type="button" className="icon-btn" onClick={() => router.push('/settings')} aria-label="Parametres">
             <SettingsGearIcon />
           </button>
         </header>
+
+        <section className="inline-card secure-overview">
+          <div className="secure-overview-head">
+            <div>
+              <p className="section-title">Protection active</p>
+              <strong>Style Signal, sans fuite visible</strong>
+            </div>
+            <span className="secure-badge">Prive</span>
+          </div>
+          <div className="secure-chip-row">
+            <span className="secure-chip">E2E</span>
+            <span className="secure-chip">Sealed sender</span>
+            <span className="secure-chip">{preferences.hideMessagePreviews ? 'Apercus masques' : 'Apercus visibles'}</span>
+            <span className="secure-chip">Disparition {describeDisappearingTimer(preferences.disappearingTimerSeconds)}</span>
+          </div>
+        </section>
 
         <div className="sticky-search">
           <div className="search-wrap">

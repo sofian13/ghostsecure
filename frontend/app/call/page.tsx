@@ -5,19 +5,10 @@ import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
 import { createConversation } from '@/lib/api';
-import { callSession, type IncomingOffer, type InviteRow, type VoicePreset } from '@/lib/callSession';
+import { callSession, type IncomingOffer, type InviteRow } from '@/lib/callSession';
+import { getGhostPreferences, subscribeGhostPreferences } from '@/lib/preferences';
 import { getSession } from '@/lib/session';
 import { getSupabaseClient } from '@/lib/supabase';
-
-const VOICE_PRESETS: { value: VoicePreset; label: string; emoji: string }[] = [
-  { value: 'normal', label: 'Normal', emoji: '\uD83C\uDFA4' },
-  { value: 'ghost', label: 'Ghost', emoji: '\uD83D\uDC7B' },
-  { value: 'robot', label: 'Robot', emoji: '\uD83E\uDD16' },
-  { value: 'deep', label: 'Deep', emoji: '\uD83C\uDF0A' },
-  { value: 'vader', label: 'Vader', emoji: '\u2694\uFE0F' },
-  { value: 'anonymous', label: 'Anonymous', emoji: '\uD83C\uDFAD' },
-  { value: 'grave', label: 'Grave', emoji: '\uD83D\uDD0A' },
-];
 
 const REJECT_COOLDOWN_MS = 15000;
 
@@ -28,6 +19,7 @@ function normalizeUserId(value: string | null | undefined): string {
 export default function CallPage() {
   const router = useRouter();
   const live = useSyncExternalStore(callSession.subscribe, callSession.getSnapshot, callSession.getSnapshot);
+  const preferences = useSyncExternalStore(subscribeGhostPreferences, getGhostPreferences, getGhostPreferences);
   const [userId, setUserId] = useState<string | null>(null);
   const [targetId, setTargetId] = useState('');
   const [autoCall, setAutoCall] = useState(false);
@@ -50,6 +42,10 @@ export default function CallPage() {
     liveCallActiveRef.current = live.callActive;
     incomingOfferRef.current = incomingOffer;
   }, [incomingOffer, live.callActive]);
+
+  useEffect(() => {
+    void callSession.setVoiceMaskAmount(preferences.callVoiceMaskAmount);
+  }, [preferences.callVoiceMaskAmount]);
 
   useEffect(() => {
     const session = getSession();
@@ -192,18 +188,27 @@ export default function CallPage() {
               </button>
             </div>
 
-            <div className="call-voice-strip">
-              {VOICE_PRESETS.map((preset) => (
-                <button
-                  key={preset.value}
-                  type="button"
-                  className={`call-voice-chip ${live.voicePreset === preset.value ? 'active' : ''}`}
-                  onClick={() => void callSession.setVoicePreset(preset.value)}
-                >
-                  <span className="preset-emoji">{preset.emoji}</span>
-                  <span>{preset.label}</span>
-                </button>
-              ))}
+            <div className="call-mask-card">
+              <div className="call-mask-head">
+                <div>
+                  <strong>Voix masquee</strong>
+                  <p className="muted-text">Claire, mais plus difficile a reconnaitre.</p>
+                </div>
+                <span className="secure-badge">{live.voiceMaskAmount}%</span>
+              </div>
+              <input
+                className="settings-range"
+                type="range"
+                min="35"
+                max="85"
+                step="1"
+                value={live.voiceMaskAmount}
+                onChange={(e) => void callSession.setVoiceMaskAmount(Number(e.target.value))}
+              />
+              <div className="settings-range-legend">
+                <span>Plus naturel</span>
+                <span>Plus anonyme</span>
+              </div>
             </div>
 
             {incomingOffer && !live.callActive ? (

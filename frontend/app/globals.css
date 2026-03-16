@@ -1470,6 +1470,143 @@ select {
   line-height: 1.6;
 }
 
+.security-pill.secondary {
+  background: rgba(48, 64, 87, 0.72);
+}
+
+.secure-overview,
+.settings-hero {
+  background:
+    radial-gradient(circle at top right, rgba(91, 190, 255, 0.18), transparent 38%),
+    linear-gradient(160deg, rgba(18, 27, 39, 0.94), rgba(24, 36, 52, 0.9));
+}
+
+:root[data-theme='light'] .secure-overview,
+:root[data-theme='light'] .settings-hero {
+  background:
+    radial-gradient(circle at top right, rgba(91, 190, 255, 0.16), transparent 38%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.98), rgba(241, 247, 255, 0.96));
+}
+
+.secure-overview-head,
+.settings-section-head,
+.call-mask-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.secure-chip-row,
+.settings-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.secure-chip,
+.secure-badge,
+.settings-chip {
+  border-radius: var(--radius-full);
+  border: 1px solid var(--line);
+}
+
+.secure-chip,
+.settings-chip {
+  min-height: 34px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(29, 43, 63, 0.68);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+:root[data-theme='light'] .secure-chip,
+:root[data-theme='light'] .settings-chip {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.secure-badge {
+  padding: 6px 12px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 14%, var(--card));
+}
+
+.settings-redesign .inline-card {
+  gap: var(--sp-4);
+}
+
+.pref-stack {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.pref-group {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.pref-group-label {
+  display: grid;
+  gap: 4px;
+}
+
+.pref-group-label span {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.settings-chip {
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+
+.settings-chip.active {
+  border-color: color-mix(in oklab, var(--accent) 50%, var(--line));
+  background: linear-gradient(145deg, rgba(68, 145, 225, 0.34), rgba(80, 93, 215, 0.24));
+}
+
+.settings-range {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.settings-range-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.danger-zone {
+  border-color: color-mix(in oklab, var(--danger) 30%, var(--line));
+}
+
+.mobile-chats .chat-row {
+  min-height: 74px;
+  border-radius: 22px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 45%),
+    var(--card-soft);
+}
+
+.mobile-chats .sticky-search {
+  padding-top: 0;
+}
+
+.mobile-chats .search-wrap {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--card);
+  backdrop-filter: blur(14px);
+  padding: 4px;
+}
+
 /* ===== VOICE PRESETS ===== */
 .voice-presets {
   display: grid;
@@ -1619,33 +1756,20 @@ select {
   font-size: var(--text-sm);
 }
 
-.call-voice-strip {
+.call-mask-card {
   position: relative;
   z-index: 1;
   width: 100%;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-2);
-}
-
-.call-voice-chip {
-  min-height: 54px;
   border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(22, 31, 44, 0.72);
-  color: var(--muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  padding: 0 var(--sp-3);
-  text-align: center;
+  border-radius: 24px;
+  padding: var(--sp-4);
+  background: rgba(18, 26, 39, 0.7);
+  display: grid;
+  gap: var(--sp-3);
 }
 
-.call-voice-chip.active {
-  color: var(--text);
-  border-color: color-mix(in oklab, var(--accent) 55%, var(--line));
-  background: linear-gradient(145deg, rgba(74, 143, 222, 0.3), rgba(92, 95, 212, 0.28));
+:root[data-theme='light'] .call-mask-card {
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .call-primary-row {

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
@@ -8,6 +8,7 @@ import { getSession } from '@/lib/session';
 import { addGroupMember, fetchConversationDetail, fetchMessages, fetchPreKeyBundle, leaveGroupConversation, sendMessage } from '@/lib/api';
 import { encryptForParticipants } from '@/lib/crypto';
 import { decryptForUser, type DecryptedMessage } from '@/lib/messages';
+import { describeDisappearingTimer, getGhostPreferences, subscribeGhostPreferences } from '@/lib/preferences';
 import { hasRatchetSession, createOutboundSession, encryptRatchet } from '@/lib/ratchet';
 import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
@@ -20,6 +21,7 @@ export default function ConversationPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const preferences = useSyncExternalStore(subscribeGhostPreferences, getGhostPreferences, getGhostPreferences);
   const conversationId = decodeURIComponent(params.id);
 
   const [session, setSessionState] = useState<Session | null>(null);
@@ -243,7 +245,10 @@ export default function ConversationPage() {
 
         if (await hasRatchetSession(conversationId)) {
           const encrypted = await encryptRatchet(s.userId, conversationId, plaintext, s.userId, peer.id);
-          const sent = await sendMessage(s, conversationId, encrypted);
+          const sent = await sendMessage(s, conversationId, {
+            ...encrypted,
+            expiresInSeconds: preferences.disappearingTimerSeconds > 0 ? preferences.disappearingTimerSeconds : undefined,
+          });
           return buildSenderMessage(sent, s.userId, plaintext);
         }
       } catch {
@@ -261,7 +266,10 @@ export default function ConversationPage() {
       s.userId
     );
     console.debug('[GS:send] wrappedKeys:', Object.keys(encrypted.wrappedKeys), 'hasEphemeral:', !!encrypted.ephemeralPublicKey);
-    const sent = await sendMessage(s, conversationId, { ...encrypted });
+    const sent = await sendMessage(s, conversationId, {
+      ...encrypted,
+      expiresInSeconds: preferences.disappearingTimerSeconds > 0 ? preferences.disappearingTimerSeconds : undefined,
+    });
     return buildSenderMessage(sent, s.userId, plaintext);
   };
 
@@ -534,7 +542,7 @@ export default function ConversationPage() {
 
         {incomingCallFrom && (
           <div className="incoming-banner">
-            <p>{incomingCallFrom} vous appelle</p>
+            <p>{preferences.hideCallerIdentity ? 'Appel entrant securise' : `${incomingCallFrom} vous appelle`}</p>
             <button
               type="button"
               className="ghost-primary"
@@ -550,6 +558,9 @@ export default function ConversationPage() {
 
         <section className="message-thread" ref={listRef}>
           <div className="security-pill">Chiffrement de bout en bout active</div>
+          {preferences.disappearingTimerSeconds > 0 && (
+            <div className="security-pill secondary">Messages ephemeres: {describeDisappearingTimer(preferences.disappearingTimerSeconds)}</div>
+          )}
 
           {messages.length === 0 && (
             <div className="conv-empty">

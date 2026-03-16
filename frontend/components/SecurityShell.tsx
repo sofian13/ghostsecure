@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { getSupabaseClient } from '@/lib/supabase';
+import { getGhostPreferences, subscribeGhostPreferences } from '@/lib/preferences';
 
 type Props = {
   userId: string;
@@ -9,18 +10,43 @@ type Props = {
 };
 
 export default function SecurityShell({ userId, children }: Props) {
+  const preferences = useSyncExternalStore(subscribeGhostPreferences, getGhostPreferences, getGhostPreferences);
   const [hidden, setHidden] = useState(false);
   const [manualLock, setManualLock] = useState(false);
   const [captureAlert, setCaptureAlert] = useState(false);
   const [incomingCall, setIncomingCall] = useState<{ inviteId: string; fromUserId: string } | null>(null);
+  const blurTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const lock = () => setHidden(true);
-    const onVisibility = () => setHidden(document.visibilityState !== 'visible');
-    const onBlur = () => setHidden(true);
-    const onFocus = () => setHidden(document.visibilityState !== 'visible');
-    const onPageHide = () => setHidden(true);
-    const onResize = () => setHidden(true);
+    const scheduleLock = () => {
+      if (blurTimerRef.current) window.clearTimeout(blurTimerRef.current);
+      const delayMs = preferences.autoLockDelaySeconds * 1000;
+      if (delayMs === 0) {
+        setHidden(true);
+        return;
+      }
+      blurTimerRef.current = window.setTimeout(() => setHidden(true), delayMs);
+    };
+    const cancelScheduledLock = () => {
+      if (blurTimerRef.current) window.clearTimeout(blurTimerRef.current);
+      blurTimerRef.current = null;
+    };
+    const lock = () => scheduleLock();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        cancelScheduledLock();
+        setHidden(false);
+        return;
+      }
+      scheduleLock();
+    };
+    const onBlur = () => scheduleLock();
+    const onFocus = () => {
+      cancelScheduledLock();
+      setHidden(document.visibilityState !== 'visible');
+    };
+    const onPageHide = () => scheduleLock();
+    const onResize = () => scheduleLock();
     const onKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
       const blockedCombo = (event.ctrlKey || event.metaKey) && ['c', 'v', 'x', 'p', 's'].includes(key);
@@ -50,8 +76,9 @@ export default function SecurityShell({ userId, children }: Props) {
       window.removeEventListener('orientationchange', onResize);
       window.removeEventListener('beforeprint', lock);
       window.removeEventListener('keydown', onKeyDown);
+      cancelScheduledLock();
     };
-  }, []);
+  }, [preferences.autoLockDelaySeconds]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return;
@@ -95,7 +122,7 @@ export default function SecurityShell({ userId, children }: Props) {
     const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> } };
 
     const requestWakeLock = async () => {
-      if (!nav.wakeLock || document.visibilityState !== 'visible' || hidden || manualLock) return;
+      if (!preferences.keepScreenAwake || !nav.wakeLock || document.visibilityState !== 'visible' || hidden || manualLock) return;
       try {
         wakeLock = await nav.wakeLock.request('screen');
       } catch {
@@ -128,7 +155,7 @@ export default function SecurityShell({ userId, children }: Props) {
       document.removeEventListener('visibilitychange', onVisibility);
       void releaseWakeLock();
     };
-  }, [hidden, manualLock]);
+  }, [hidden, manualLock, preferences.keepScreenAwake]);
 
   useEffect(() => {
     const me = userId.trim().toLowerCase();
@@ -172,8 +199,9 @@ export default function SecurityShell({ userId, children }: Props) {
 
       if (typeof Notification !== 'undefined') {
         const show = () => {
+          const body = preferences.hideCallerIdentity ? 'Ouvrez Ghost Secure pour repondre.' : `${fromUserId} vous appelle`;
           const n = new Notification('Ghost Secure - Appel entrant', {
-            body: `${fromUserId} vous appelle`,
+            body,
             tag: `call-${inviteId}`,
             requireInteraction: true,
           });
@@ -224,7 +252,7 @@ export default function SecurityShell({ userId, children }: Props) {
       window.clearInterval(poll);
       void supabase.removeChannel(channel);
     };
-  }, [userId]);
+  }, [preferences.hideCallerIdentity, userId]);
 
   const wm = useMemo(() => `ghost:${userId.slice(0, 8)}`, [userId]);
   const isMasked = hidden || manualLock;
@@ -265,7 +293,7 @@ export default function SecurityShell({ userId, children }: Props) {
         <div className="incoming-popup" role="alert" aria-live="assertive">
           <div>
             <strong>Appel entrant</strong>
-            <p>{incomingCall.fromUserId} vous appelle</p>
+            <p>{preferences.hideCallerIdentity ? 'Identite masquee jusqu a ouverture de l appel' : `${incomingCall.fromUserId} vous appelle`}</p>
           </div>
           <div className="row">
             <button

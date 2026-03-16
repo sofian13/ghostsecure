@@ -2,8 +2,6 @@
 
 import { getSupabaseClient } from '@/lib/supabase';
 
-export type VoicePreset = 'normal' | 'ghost' | 'robot' | 'deep' | 'vader' | 'anonymous' | 'grave';
-
 export type InviteRow = {
   id: string;
   call_id: string;
@@ -26,7 +24,7 @@ export type IncomingOffer = {
 export type CallSessionSnapshot = {
   targetId: string;
   connected: boolean;
-  voicePreset: VoicePreset;
+  voiceMaskAmount: number;
   statusText: string;
   speakerOn: boolean;
   callActive: boolean;
@@ -41,6 +39,10 @@ const ANSWER_WAIT_TIMEOUT_MS = 30000;
 
 function normalizeUserId(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase();
+}
+
+function clampMaskAmount(value: number): number {
+  return Math.min(85, Math.max(35, Math.round(value)));
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, reason: string): Promise<T> {
@@ -96,7 +98,7 @@ class CallSessionManager {
   private state: CallSessionSnapshot = {
     targetId: '',
     connected: false,
-    voicePreset: 'normal',
+    voiceMaskAmount: 58,
     statusText: 'Pret',
     speakerOn: false,
     callActive: false,
@@ -106,15 +108,13 @@ class CallSessionManager {
 
   private localStream: MediaStream | null = null;
 
-  private processedStream: MediaStream | null = null;
+  private maskedStream: MediaStream | null = null;
 
   private remoteAudio: HTMLAudioElement | null = null;
 
   private audioCtx: AudioContext | null = null;
 
   private processingCleanup: (() => void) | null = null;
-
-  private activeCallId: string | null = null;
 
   private activeInviteId: string | null = null;
 
@@ -133,20 +133,19 @@ class CallSessionManager {
     return () => this.listeners.delete(listener);
   };
 
-  getSnapshot = (): CallSessionSnapshot => this.state;
+  getSnapshot = () => this.state;
 
   setTarget(targetId: string) {
     const nextTarget = normalizeUserId(targetId);
-    if (this.state.callActive && this.state.targetId && nextTarget && this.state.targetId !== nextTarget) {
-      return;
-    }
+    if (this.state.callActive && this.state.targetId && nextTarget && this.state.targetId !== nextTarget) return;
     this.setState({ targetId: nextTarget });
   }
 
-  async setVoicePreset(preset: VoicePreset) {
-    this.setState({ voicePreset: preset });
+  async setVoiceMaskAmount(amount: number) {
+    const nextAmount = clampMaskAmount(amount);
+    this.setState({ voiceMaskAmount: nextAmount });
     if (!this.pc || !this.localStream) return;
-    await this.replaceOutgoingTrack(preset);
+    await this.replaceOutgoingTrack(nextAmount);
   }
 
   async toggleSpeaker() {
@@ -163,7 +162,7 @@ class CallSessionManager {
 
     try {
       this.callStarting = true;
-      this.setState({ targetId: target, callActive: true });
+      this.setState({ targetId: target, callActive: true, statusText: 'Preparation de l appel...' });
 
       await Promise.race([
         this.cleanupOpenInvites(me, target),
@@ -176,21 +175,16 @@ class CallSessionManager {
       this.setupTimeout = window.setTimeout(() => {
         if (this.callStarting) this.setState({ statusText: 'Preparation trop longue. Verifiez micro/reseau puis reessayez.' });
       }, CALL_SETUP_MAX_MS);
-      this.setState({ statusText: 'Preparation de l appel...' });
 
       const callId = crypto.randomUUID();
       const inviteId = crypto.randomUUID();
-      const pc = await withTimeout(
-        this.ensurePeer(target, callId),
-        CALL_SETUP_MAX_MS,
-        'Timeout preparation audio (micro/reseau)'
-      );
+      const pc = await withTimeout(this.ensurePeer(target), CALL_SETUP_MAX_MS, 'Timeout preparation audio (micro/reseau)');
       const offer = await pc.createOffer({ offerToReceiveAudio: true });
       await pc.setLocalDescription(offer);
       await this.waitIceGatheringPartial(pc, ICE_PARTIAL_GATHERING_CALLER_MS);
 
       const supabase = getSupabaseClient();
-      const insertResult = (await withTimeout(
+      const insertResult = await withTimeout(
         Promise.resolve(supabase.from('call_invite').insert({
           id: inviteId,
           call_id: callId,
@@ -203,7 +197,7 @@ class CallSessionManager {
         })),
         CALL_SETUP_MAX_MS,
         'Timeout signalisation appel'
-      )) as { error: { message: string } | null };
+      ) as { error: { message: string } | null };
 
       if (insertResult.error) {
         this.setState({ statusText: `Erreur signalisation: ${insertResult.error.message}` });
@@ -212,12 +206,11 @@ class CallSessionManager {
       }
 
       this.activeInviteId = inviteId;
-      this.setState({ statusText: `Sonnerie chez ${target}...`, callActive: true, targetId: target });
+      this.setState({ statusText: `Sonnerie chez ${target}...`, targetId: target, callActive: true });
       if (this.connectTimeout) window.clearTimeout(this.connectTimeout);
       this.connectTimeout = window.setTimeout(() => {
-        const state = this.pc?.connectionState;
-        if (state !== 'connected') {
-          this.setState({ statusText: 'Connexion lente. Reessayez ou ajoutez TURN dedie.' });
+        if (this.pc?.connectionState !== 'connected') {
+          this.setState({ statusText: 'Connexion lente. Reessayez ou utilisez un meilleur reseau.' });
         }
       }, CONNECT_SLOW_NETWORK_TIMEOUT_MS);
 
@@ -244,7 +237,7 @@ class CallSessionManager {
         callActive: true,
       });
 
-      const pc = await this.ensurePeer(incoming.fromUserId, incoming.callId);
+      const pc = await this.ensurePeer(incoming.fromUserId);
       await pc.setRemoteDescription(incoming.sdp);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -278,11 +271,7 @@ class CallSessionManager {
       }
 
       this.activeInviteId = incoming.inviteId;
-      this.setState({
-        targetId: normalizeUserId(incoming.fromUserId),
-        statusText: `Connexion avec ${incoming.fromUserId}...`,
-        callActive: true,
-      });
+      this.setState({ statusText: `Connexion avec ${incoming.fromUserId}...`, callActive: true });
       this.startAnswerPolling(incoming.inviteId, false);
       void this.finalizeAnswerSdp(incoming.inviteId);
     } catch (error) {
@@ -297,10 +286,7 @@ class CallSessionManager {
   async rejectIncoming(userId: string, incoming: IncomingOffer) {
     const me = normalizeUserId(userId);
     const supabase = getSupabaseClient();
-    await supabase
-      .from('call_invite')
-      .update({ status: 'rejected', updated_at: new Date().toISOString() })
-      .eq('id', incoming.inviteId);
+    await supabase.from('call_invite').update({ status: 'rejected', updated_at: new Date().toISOString() }).eq('id', incoming.inviteId);
     if (me) {
       await supabase
         .from('call_invite')
@@ -313,41 +299,33 @@ class CallSessionManager {
   }
 
   async endCall() {
-    const inviteId = this.activeInviteId;
-    if (inviteId) {
-      const supabase = getSupabaseClient();
-      await supabase
+    if (this.activeInviteId) {
+      await getSupabaseClient()
         .from('call_invite')
         .update({ status: 'ended', updated_at: new Date().toISOString() })
-        .eq('id', inviteId);
+        .eq('id', this.activeInviteId);
     }
     this.teardownPeer(false);
     this.setState({ statusText: 'Appel termine', callActive: false, connected: false, speakerOn: false });
   }
 
-  private emit() {
+  private setState(patch: Partial<CallSessionSnapshot>) {
+    this.state = { ...this.state, ...patch };
     this.listeners.forEach((listener) => listener());
   }
 
-  private setState(patch: Partial<CallSessionSnapshot>) {
-    this.state = { ...this.state, ...patch };
-    this.emit();
-  }
-
-  private ensureRemoteAudio(): HTMLAudioElement {
+  private ensureRemoteAudio() {
     if (this.remoteAudio && document.body.contains(this.remoteAudio)) return this.remoteAudio;
     const audio = document.createElement('audio');
     audio.autoplay = true;
     audio.muted = false;
     audio.setAttribute('playsinline', 'true');
+    audio.setAttribute('aria-hidden', 'true');
     audio.style.position = 'fixed';
+    audio.style.opacity = '0';
     audio.style.width = '1px';
     audio.style.height = '1px';
-    audio.style.opacity = '0';
     audio.style.pointerEvents = 'none';
-    audio.style.bottom = '0';
-    audio.style.left = '0';
-    audio.setAttribute('aria-hidden', 'true');
     document.body.appendChild(audio);
     this.remoteAudio = audio;
     void this.applySpeakerMode(this.state.speakerOn);
@@ -358,251 +336,96 @@ class CallSessionManager {
     const media = this.ensureRemoteAudio() as HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> };
     if (typeof media.setSinkId !== 'function' || !navigator.mediaDevices?.enumerateDevices) return;
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const outputs = devices.filter((device) => device.kind === 'audiooutput');
+      const outputs = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'audiooutput');
       if (outputs.length === 0) return;
       const preferred = enabled
         ? outputs.find((device) => /speaker|haut/i.test(device.label))
         : outputs.find((device) => /default|communications|head(phone|set)|ear/i.test(device.label)) ?? outputs[0];
       if (preferred?.deviceId) await media.setSinkId(preferred.deviceId);
     } catch {
-      // Output routing is browser-dependent; keep the toggle state even if routing is unsupported.
+      // Browser support varies; keep logical toggle state.
     }
   }
 
-  private async buildProcessedStream(input: MediaStream, preset: VoicePreset): Promise<MediaStream> {
+  private async buildMaskedStream(input: MediaStream, amount: number): Promise<MediaStream> {
+    const maskAmount = clampMaskAmount(amount);
+    const intensity = (maskAmount - 35) / 50;
+
     const ctx = new AudioContext();
     if (ctx.state === 'suspended') await ctx.resume();
+
     const source = ctx.createMediaStreamSource(input);
     const destination = ctx.createMediaStreamDestination();
     const cleanup: Array<() => void> = [];
 
-    if (preset === 'ghost') {
-      const hp = ctx.createBiquadFilter();
-      hp.type = 'highpass';
-      hp.frequency.value = 320;
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = 1650;
-      bp.Q.value = 1.1;
-      const shaper = ctx.createWaveShaper();
-      shaper.curve = createDistortionCurve(30);
-      shaper.oversample = '4x';
-      source.connect(hp);
-      hp.connect(bp);
-      bp.connect(shaper);
-      shaper.connect(destination);
-    } else if (preset === 'robot') {
-      const shaper = ctx.createWaveShaper();
-      shaper.curve = createDistortionCurve(55);
-      shaper.oversample = '4x';
-      const tremolo = ctx.createGain();
-      tremolo.gain.value = 0.7;
-      const lfo = ctx.createOscillator();
-      const lfoDepth = ctx.createGain();
-      lfo.frequency.value = 38;
-      lfoDepth.gain.value = 0.28;
-      lfo.connect(lfoDepth);
-      lfoDepth.connect(tremolo.gain);
-      lfo.start();
-      cleanup.push(() => lfo.stop());
-      source.connect(shaper);
-      shaper.connect(tremolo);
-      tremolo.connect(destination);
-    } else if (preset === 'deep') {
-      const lowShelf = ctx.createBiquadFilter();
-      lowShelf.type = 'lowshelf';
-      lowShelf.frequency.value = 200;
-      lowShelf.gain.value = 22;
-      const peaking = ctx.createBiquadFilter();
-      peaking.type = 'peaking';
-      peaking.frequency.value = 260;
-      peaking.Q.value = 1.1;
-      peaking.gain.value = 12;
-      const lowpass = ctx.createBiquadFilter();
-      lowpass.type = 'lowpass';
-      lowpass.frequency.value = 900;
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -30;
-      compressor.knee.value = 16;
-      compressor.ratio.value = 12;
-      compressor.attack.value = 0.008;
-      compressor.release.value = 0.22;
-      const shaper = ctx.createWaveShaper();
-      shaper.curve = createDistortionCurve(75);
-      shaper.oversample = '4x';
-      source.connect(lowShelf);
-      lowShelf.connect(peaking);
-      peaking.connect(lowpass);
-      lowpass.connect(compressor);
-      compressor.connect(shaper);
-      shaper.connect(destination);
-    } else if (preset === 'vader') {
-      const highpass = ctx.createBiquadFilter();
-      highpass.type = 'highpass';
-      highpass.frequency.value = 55;
+    const highpass = ctx.createBiquadFilter();
+    highpass.type = 'highpass';
+    highpass.frequency.value = 140 + intensity * 120;
 
-      const lowShelf = ctx.createBiquadFilter();
-      lowShelf.type = 'lowshelf';
-      lowShelf.frequency.value = 160;
-      lowShelf.gain.value = 26;
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = 2600 - intensity * 700;
+    lowpass.Q.value = 0.7;
 
-      const lowpass = ctx.createBiquadFilter();
-      lowpass.type = 'lowpass';
-      lowpass.frequency.value = 520;
-      lowpass.Q.value = 0.9;
+    const notch = ctx.createBiquadFilter();
+    notch.type = 'notch';
+    notch.frequency.value = 900 + intensity * 450;
+    notch.Q.value = 2.4 + intensity * 1.8;
 
-      const peaking = ctx.createBiquadFilter();
-      peaking.type = 'peaking';
-      peaking.frequency.value = 115;
-      peaking.Q.value = 1.4;
-      peaking.gain.value = 18;
+    const peaking = ctx.createBiquadFilter();
+    peaking.type = 'peaking';
+    peaking.frequency.value = 2100 - intensity * 350;
+    peaking.Q.value = 1.2;
+    peaking.gain.value = -3 - intensity * 5;
 
-      const ring = ctx.createGain();
-      ring.gain.value = 0.8;
-      const lfo = ctx.createOscillator();
-      const lfoDepth = ctx.createGain();
-      lfo.type = 'sawtooth';
-      lfo.frequency.value = 36;
-      lfoDepth.gain.value = 0.55;
-      lfo.connect(lfoDepth);
-      lfoDepth.connect(ring.gain);
-      lfo.start();
-      cleanup.push(() => lfo.stop());
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -24;
+    compressor.knee.value = 14;
+    compressor.ratio.value = 8 + intensity * 4;
+    compressor.attack.value = 0.004;
+    compressor.release.value = 0.14;
 
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -36;
-      compressor.knee.value = 20;
-      compressor.ratio.value = 14;
-      compressor.attack.value = 0.004;
-      compressor.release.value = 0.2;
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = createDistortionCurve(26 + intensity * 36);
+    shaper.oversample = '4x';
 
-      const shaper = ctx.createWaveShaper();
-      shaper.curve = createDistortionCurve(120);
-      shaper.oversample = '4x';
+    const tremolo = ctx.createGain();
+    tremolo.gain.value = 0.95;
+    const lfo = ctx.createOscillator();
+    const lfoDepth = ctx.createGain();
+    lfo.type = 'triangle';
+    lfo.frequency.value = 7 + intensity * 3;
+    lfoDepth.gain.value = 0.015 + intensity * 0.03;
+    lfo.connect(lfoDepth);
+    lfoDepth.connect(tremolo.gain);
+    lfo.start();
+    cleanup.push(() => lfo.stop());
 
-      const delay = ctx.createDelay(0.08);
-      delay.delayTime.value = 0.028;
-      const delayGain = ctx.createGain();
-      delayGain.gain.value = 0.24;
-      delay.connect(delayGain);
-      delayGain.connect(delay);
+    const blend = ctx.createGain();
+    blend.gain.value = 0.94;
 
-      source.connect(highpass);
-      highpass.connect(lowShelf);
-      lowShelf.connect(peaking);
-      peaking.connect(lowpass);
-      lowpass.connect(ring);
-      ring.connect(compressor);
-      compressor.connect(shaper);
-      shaper.connect(destination);
-      shaper.connect(delay);
-      delay.connect(destination);
-    } else if (preset === 'anonymous') {
-      const highpass = ctx.createBiquadFilter();
-      highpass.type = 'highpass';
-      highpass.frequency.value = 180;
-
-      const lowpass = ctx.createBiquadFilter();
-      lowpass.type = 'lowpass';
-      lowpass.frequency.value = 2400;
-      lowpass.Q.value = 0.8;
-
-      const notch = ctx.createBiquadFilter();
-      notch.type = 'notch';
-      notch.frequency.value = 900;
-      notch.Q.value = 3.5;
-
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -24;
-      compressor.knee.value = 8;
-      compressor.ratio.value = 8;
-      compressor.attack.value = 0.006;
-      compressor.release.value = 0.18;
-
-      const shaper = ctx.createWaveShaper();
-      shaper.curve = createDistortionCurve(35);
-      shaper.oversample = '4x';
-
-      const tremolo = ctx.createGain();
-      tremolo.gain.value = 0.92;
-      const lfo = ctx.createOscillator();
-      const lfoDepth = ctx.createGain();
-      lfo.type = 'triangle';
-      lfo.frequency.value = 18;
-      lfoDepth.gain.value = 0.12;
-      lfo.connect(lfoDepth);
-      lfoDepth.connect(tremolo.gain);
-      lfo.start();
-      cleanup.push(() => lfo.stop());
-
-      source.connect(highpass);
-      highpass.connect(lowpass);
-      lowpass.connect(notch);
-      notch.connect(compressor);
-      compressor.connect(shaper);
-      shaper.connect(tremolo);
-      tremolo.connect(destination);
-    } else if (preset === 'grave') {
-      const highpass = ctx.createBiquadFilter();
-      highpass.type = 'highpass';
-      highpass.frequency.value = 70;
-
-      const lowShelf = ctx.createBiquadFilter();
-      lowShelf.type = 'lowshelf';
-      lowShelf.frequency.value = 190;
-      lowShelf.gain.value = 7;
-
-      const bodyPeak = ctx.createBiquadFilter();
-      bodyPeak.type = 'peaking';
-      bodyPeak.frequency.value = 260;
-      bodyPeak.Q.value = 0.9;
-      bodyPeak.gain.value = 4;
-
-      const formantShift = ctx.createBiquadFilter();
-      formantShift.type = 'peaking';
-      formantShift.frequency.value = 1700;
-      formantShift.Q.value = 1.1;
-      formantShift.gain.value = -3.5;
-
-      const lowpass = ctx.createBiquadFilter();
-      lowpass.type = 'lowpass';
-      lowpass.frequency.value = 3200;
-      lowpass.Q.value = 0.7;
-
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.value = -22;
-      compressor.knee.value = 10;
-      compressor.ratio.value = 4;
-      compressor.attack.value = 0.004;
-      compressor.release.value = 0.16;
-
-      source.connect(highpass);
-      highpass.connect(lowShelf);
-      lowShelf.connect(bodyPeak);
-      bodyPeak.connect(formantShift);
-      formantShift.connect(lowpass);
-      lowpass.connect(compressor);
-      compressor.connect(destination);
-    } else {
-      source.connect(destination);
-    }
+    source.connect(highpass);
+    highpass.connect(lowpass);
+    lowpass.connect(notch);
+    notch.connect(peaking);
+    peaking.connect(compressor);
+    compressor.connect(shaper);
+    shaper.connect(tremolo);
+    tremolo.connect(blend);
+    blend.connect(destination);
 
     this.audioCtx = ctx;
     this.processingCleanup = () => cleanup.forEach((fn) => fn());
     return destination.stream;
   }
 
-  private async ensurePeer(target: string, callId: string) {
+  private async ensurePeer(target: string) {
     if (this.pc) return this.pc;
     const local = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     this.localStream = local;
 
-    let outbound = local;
-    if (this.state.voicePreset !== 'normal') {
-      outbound = await this.buildProcessedStream(local, this.state.voicePreset);
-      this.processedStream = outbound;
-    }
+    const outbound = await this.buildMaskedStream(local, this.state.voiceMaskAmount);
+    this.maskedStream = outbound;
 
     const pc = new RTCPeerConnection({
       iceServers: ICE_SERVERS,
@@ -620,7 +443,7 @@ class CallSessionManager {
         encodings[0] = { ...encodings[0], maxBitrate: LOW_BANDWIDTH_AUDIO_MAX_BITRATE };
         await sender.setParameters({ ...params, encodings });
       } catch {
-        // Some browsers can reject setParameters early; call setup remains functional without it.
+        // Some browsers reject setParameters early.
       }
     }
 
@@ -637,7 +460,7 @@ class CallSessionManager {
       this.setState({ connected: state === 'connected' });
       if (state === 'connected') this.setState({ statusText: 'En appel', callActive: true });
       if (state === 'connecting') this.setState({ statusText: 'Connexion...', callActive: true });
-      if (state === 'failed') this.setState({ statusText: 'Connexion echouee. Relancez appel ou configurez TURN dedie.' });
+      if (state === 'failed') this.setState({ statusText: 'Connexion echouee. Relancez appel ou changez de reseau.' });
       if (state === 'disconnected') this.setState({ statusText: 'Reseau instable, reconnexion...' });
       if (state === 'connected' || state === 'failed' || state === 'closed') {
         if (this.connectTimeout) window.clearTimeout(this.connectTimeout);
@@ -645,43 +468,31 @@ class CallSessionManager {
       }
     };
 
-    this.activeCallId = callId;
     this.pc = pc;
     this.setState({ targetId: normalizeUserId(target), callActive: true });
     return pc;
   }
 
-  private async replaceOutgoingTrack(preset: VoicePreset) {
+  private async replaceOutgoingTrack(amount: number) {
     if (!this.pc || !this.localStream) return;
     const sender = this.pc.getSenders().find((entry) => entry.track?.kind === 'audio');
     if (!sender) return;
 
-    if (preset === 'normal') {
-      const originalTrack = this.localStream.getAudioTracks()[0];
-      if (originalTrack) await sender.replaceTrack(originalTrack);
-      this.processedStream?.getTracks().forEach((track) => track.stop());
-      this.processedStream = null;
-      this.processingCleanup?.();
-      this.processingCleanup = null;
-      await this.audioCtx?.close();
-      this.audioCtx = null;
-      return;
-    }
-
-    const processed = await this.buildProcessedStream(this.localStream, preset);
-    const track = processed.getAudioTracks()[0];
+    const masked = await this.buildMaskedStream(this.localStream, amount);
+    const track = masked.getAudioTracks()[0];
     if (track) await sender.replaceTrack(track);
-    this.processedStream?.getTracks().forEach((oldTrack) => oldTrack.stop());
-    this.processedStream = processed;
+
+    this.maskedStream?.getTracks().forEach((oldTrack) => oldTrack.stop());
+    this.maskedStream = masked;
   }
 
   private teardownPeer(clearTarget: boolean) {
     this.pc?.close();
     this.pc = null;
     this.localStream?.getTracks().forEach((track) => track.stop());
-    this.processedStream?.getTracks().forEach((track) => track.stop());
+    this.maskedStream?.getTracks().forEach((track) => track.stop());
     this.localStream = null;
-    this.processedStream = null;
+    this.maskedStream = null;
     if (this.remoteAudio) {
       this.remoteAudio.pause();
       this.remoteAudio.srcObject = null;
@@ -690,7 +501,6 @@ class CallSessionManager {
     this.processingCleanup = null;
     void this.audioCtx?.close();
     this.audioCtx = null;
-    this.activeCallId = null;
     this.activeInviteId = null;
     if (this.answerPoll) window.clearInterval(this.answerPoll);
     this.answerPoll = null;
@@ -707,27 +517,7 @@ class CallSessionManager {
     });
   }
 
-  private async waitIceGatheringComplete(pc: RTCPeerConnection): Promise<void> {
-    await new Promise<void>((resolve) => {
-      if (pc.iceGatheringState === 'complete') {
-        resolve();
-        return;
-      }
-      const onState = () => {
-        if (pc.iceGatheringState === 'complete') {
-          pc.removeEventListener('icegatheringstatechange', onState);
-          resolve();
-        }
-      };
-      pc.addEventListener('icegatheringstatechange', onState);
-      window.setTimeout(() => {
-        pc.removeEventListener('icegatheringstatechange', onState);
-        resolve();
-      }, 14000);
-    });
-  }
-
-  private async waitIceGatheringPartial(pc: RTCPeerConnection, ms: number): Promise<void> {
+  private async waitIceGatheringPartial(pc: RTCPeerConnection, ms: number) {
     await new Promise<void>((resolve) => {
       if (pc.iceGatheringState === 'complete') {
         resolve();
@@ -747,23 +537,39 @@ class CallSessionManager {
     });
   }
 
+  private async waitIceGatheringComplete(pc: RTCPeerConnection) {
+    await new Promise<void>((resolve) => {
+      if (pc.iceGatheringState === 'complete') {
+        resolve();
+        return;
+      }
+      const onState = () => {
+        if (pc.iceGatheringState === 'complete') {
+          pc.removeEventListener('icegatheringstatechange', onState);
+          resolve();
+        }
+      };
+      pc.addEventListener('icegatheringstatechange', onState);
+      window.setTimeout(() => {
+        pc.removeEventListener('icegatheringstatechange', onState);
+        resolve();
+      }, 14000);
+    });
+  }
+
   private async cleanupOpenInvites(me: string, target: string) {
-    const supabase = getSupabaseClient();
-    await supabase
+    await getSupabaseClient()
       .from('call_invite')
       .update({ status: 'ended', updated_at: new Date().toISOString() })
       .in('status', ['pending', 'accepted'])
-      .or(
-        `and(from_user_id.eq.${me},target_user_id.eq.${target}),and(from_user_id.eq.${target},target_user_id.eq.${me})`
-      );
+      .or(`and(from_user_id.eq.${me},target_user_id.eq.${target}),and(from_user_id.eq.${target},target_user_id.eq.${me})`);
   }
 
   private async finalizeOfferSdp(inviteId: string) {
     const pc = this.pc;
     if (!pc) return;
     await this.waitIceGatheringComplete(pc);
-    const supabase = getSupabaseClient();
-    await supabase
+    await getSupabaseClient()
       .from('call_invite')
       .update({ offer_sdp: pc.localDescription, updated_at: new Date().toISOString() })
       .eq('id', inviteId)
@@ -774,8 +580,7 @@ class CallSessionManager {
     const pc = this.pc;
     if (!pc) return;
     await this.waitIceGatheringComplete(pc);
-    const supabase = getSupabaseClient();
-    await supabase
+    await getSupabaseClient()
       .from('call_invite')
       .update({ answer_sdp: pc.localDescription, updated_at: new Date().toISOString() })
       .eq('id', inviteId)
@@ -794,8 +599,8 @@ class CallSessionManager {
         .eq('id', inviteId)
         .maybeSingle();
       if (!data) return;
-      const row = data as InviteRow;
 
+      const row = data as InviteRow;
       if (caller && row.status === 'accepted' && row.answer_sdp && this.pc && !this.pc.remoteDescription) {
         await this.pc.setRemoteDescription(row.answer_sdp);
         this.setState({ statusText: 'Connexion audio...', callActive: true });
@@ -821,3 +626,4 @@ class CallSessionManager {
 }
 
 export const callSession = new CallSessionManager();
+
