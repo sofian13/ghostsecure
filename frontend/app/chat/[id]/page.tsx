@@ -6,7 +6,7 @@ import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
 import { getSession } from '@/lib/session';
 import { addGroupMember, fetchConversationDetail, fetchMessages, fetchPreKeyBundle, leaveGroupConversation, sendMessage } from '@/lib/api';
-import { encryptForParticipants, generateSafetyNumber } from '@/lib/crypto';
+import { encryptForParticipants } from '@/lib/crypto';
 import { decryptForUser, type DecryptedMessage } from '@/lib/messages';
 import { hasRatchetSession, createOutboundSession, encryptRatchet } from '@/lib/ratchet';
 import { useRealtime } from '@/lib/useRealtime';
@@ -36,8 +36,6 @@ export default function ConversationPage() {
   const [draftVoiceBlob, setDraftVoiceBlob] = useState<Blob | null>(null);
   const [draftVoiceMime, setDraftVoiceMime] = useState<string>('audio/webm');
   const [draftVoiceDurationMs, setDraftVoiceDurationMs] = useState(0);
-  const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
-  const [showSafetyNumber, setShowSafetyNumber] = useState(false);
 
   const dismissedCallInvitesRef = useRef<Set<string>>(new Set());
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -491,43 +489,8 @@ export default function ConversationPage() {
                 <PhoneIcon />
               </button>
             )}
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Chiffrement"
-              onClick={async () => {
-                if (!session) return;
-                try {
-                  const detail = await fetchConversationDetail(session, conversationId);
-                  const peer = detail.participants.find((p) => p.id !== session.userId);
-                  if (peer) {
-                    const fingerprint = await generateSafetyNumber(peer.publicKey);
-                    setSafetyNumber(fingerprint);
-                  } else {
-                    setSafetyNumber('Aucune cle publique disponible');
-                  }
-                  setShowSafetyNumber(true);
-                } catch {
-                  setSafetyNumber('Erreur de verification');
-                  setShowSafetyNumber(true);
-                }
-              }}
-            >
-              <LockIcon />
-            </button>
           </div>
         </header>
-
-        {showSafetyNumber && safetyNumber && (
-          <div className="safety-number-overlay" onClick={() => setShowSafetyNumber(false)}>
-            <div className="safety-number-dialog" onClick={(e) => e.stopPropagation()}>
-              <p className="section-title">Numero de securite</p>
-              <p className="muted-text">Comparez ce numero avec votre contact pour verifier le chiffrement.</p>
-              <code className="safety-number-code">{safetyNumber}</code>
-              <button type="button" className="ghost-secondary" onClick={() => setShowSafetyNumber(false)}>Fermer</button>
-            </div>
-          </div>
-        )}
 
         {conversationKind === 'group' && (
           <div className="conv-group-bar">
@@ -734,14 +697,6 @@ function dateSeparatorLabel(raw: string): string {
   if (diffDays === 0) return "Aujourd'hui";
   if (diffDays === 1) return 'Hier';
   return date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
-}
-
-function LockIcon() {
-  return (
-    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 2a5 5 0 0 1 5 5v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1V7a5 5 0 0 1 5-5Zm0 2a3 3 0 0 0-3 3v3h6V7a3 3 0 0 0-3-3Zm0 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
-    </svg>
-  );
 }
 
 function BackArrowIcon() {

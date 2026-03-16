@@ -283,6 +283,62 @@ class AuthController
         return $this->json->ok(['ok' => true, 'sessionsRevoked' => $deleted]);
     }
 
+    #[Route('/auth/account', name: 'api_auth_delete_account', methods: ['DELETE', 'OPTIONS'])]
+    public function deleteAccount(Request $request)
+    {
+        if ($request->isMethod('OPTIONS')) {
+            return $this->json->ok(['ok' => true]);
+        }
+
+        $me = $this->auth->requireUser($request);
+        if (!$me instanceof User) {
+            return $this->json->error('Unauthorized.', 401);
+        }
+
+        $connection = $this->em->getConnection();
+        $connection->beginTransaction();
+
+        try {
+            if ($this->tableExists('public.friend_request')) {
+                $connection->executeStatement(
+                    'DELETE FROM friend_request WHERE requester_id = :uid OR target_user_id = :uid',
+                    ['uid' => $me->getId()]
+                );
+            }
+
+            if ($this->tableExists('public.call_invite')) {
+                $connection->executeStatement(
+                    'DELETE FROM call_invite WHERE from_user_id = :uid OR target_user_id = :uid',
+                    ['uid' => $me->getId()]
+                );
+            }
+
+            $connection->executeStatement('DELETE FROM app_user WHERE id = :uid', ['uid' => $me->getId()]);
+
+            $connection->executeStatement(
+                'DELETE FROM conversation
+                 WHERE id IN (
+                    SELECT c.id
+                    FROM conversation c
+                    LEFT JOIN conversation_member cm ON cm.conversation_id = c.id
+                    GROUP BY c.id
+                    HAVING COUNT(cm.id) = 0
+                 )'
+            );
+
+            $connection->commit();
+        } catch (\Throwable $e) {
+            $connection->rollBack();
+            $this->logger->error('Account deletion failed', ['userId' => $me->getId(), 'error' => $e->getMessage()]);
+            return $this->json->error('Unable to delete account.', 500);
+        }
+
+        $this->logger->info('Account deleted', ['userId' => $me->getId()]);
+        $response = $this->json->ok(['ok' => true]);
+        $response->headers->clearCookie('ghost_token', '/');
+        return $response;
+    }
+
     private function validatePublicKey(string $publicKey): bool
     {
         $len = strlen($publicKey);
@@ -325,5 +381,13 @@ class AuthController
         }
 
         return $ip !== null && $ip !== '' ? $ip : 'unknown';
+    }
+
+    private function tableExists(string $tableName): bool
+    {
+        return $this->em->getConnection()->fetchOne(
+            'SELECT to_regclass(:table_name)',
+            ['table_name' => $tableName]
+        ) !== null;
     }
 }

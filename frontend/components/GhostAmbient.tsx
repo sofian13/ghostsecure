@@ -29,7 +29,11 @@ export default function GhostAmbient() {
               opacity: ghost.alpha,
             } as CSSProperties
           }
-        />
+        >
+          <span className="ghost-eye ghost-eye-left" />
+          <span className="ghost-eye ghost-eye-right" />
+          <span className="ghost-mouth" />
+        </span>
       ))}
     </div>
   );

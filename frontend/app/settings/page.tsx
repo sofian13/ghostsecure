@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
-import { logoutUser, logoutAllDevices } from '@/lib/api';
+import { deleteAccount, logoutAllDevices, logoutUser } from '@/lib/api';
 import { clearSession, getSession } from '@/lib/session';
 import { wipeLocalKeys } from '@/lib/crypto';
 
@@ -14,25 +14,20 @@ export default function SettingsPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>('dark');
-  const [displayName, setDisplayName] = useState('');
-  const [statusText, setStatusText] = useState('');
   const [saved, setSaved] = useState<string | null>(null);
 
   useEffect(() => {
-    const s = getSession();
-    if (!s) {
+    const session = getSession();
+    if (!session) {
       router.replace('/login');
       return;
     }
-    setUserId(s.userId);
+    setUserId(session.userId);
 
-    const saved = window.localStorage.getItem('ghost_theme');
-    const mode = saved === 'light' ? 'light' : 'dark';
+    const savedTheme = window.localStorage.getItem('ghost_theme');
+    const mode = savedTheme === 'light' ? 'light' : 'dark';
     setTheme(mode);
     document.documentElement.dataset.theme = mode;
-
-    setDisplayName(window.localStorage.getItem('ghost_profile_name') ?? s.userId);
-    setStatusText(window.localStorage.getItem('ghost_profile_status') ?? 'Disponible');
   }, [router]);
 
   const onSwitchTheme = () => {
@@ -43,24 +38,6 @@ export default function SettingsPage() {
   };
 
   if (!userId) return <main className="centered">Chargement...</main>;
-
-  const saveProfile = () => {
-    const name = displayName.trim().slice(0, 32) || userId;
-    const status = statusText.trim().slice(0, 60) || 'Disponible';
-    window.localStorage.setItem('ghost_profile_name', name);
-    window.localStorage.setItem('ghost_profile_status', status);
-    setDisplayName(name);
-    setStatusText(status);
-    setSaved('Profil mis a jour');
-    window.setTimeout(() => setSaved(null), 2000);
-  };
-
-  const securityFeatures = [
-    'Chiffrement de bout en bout',
-    'Masquage auto si perte de focus',
-    'Blocage copier/coller et drag-drop',
-    'Session temporaire navigateur',
-  ];
 
   return (
     <SecurityShell userId={userId}>
@@ -78,24 +55,12 @@ export default function SettingsPage() {
               {userId.slice(0, 1).toUpperCase()}
             </div>
             <div>
-              <strong>{displayName || userId}</strong>
+              <strong>{userId}</strong>
               <p className="muted-text">@{userId}</p>
             </div>
           </div>
-          <label className="field">
-            <span>Nom affiche</span>
-            <input className="mobile-input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>Statut</span>
-            <input className="mobile-input" value={statusText} onChange={(e) => setStatusText(e.target.value)} />
-          </label>
-          <div className="row">
-            <button type="button" className="ghost-primary" onClick={saveProfile}>
-              Enregistrer le profil
-            </button>
-            {saved && <p className="ok-text">{saved}</p>}
-          </div>
+          <p className="muted-text">Identifiant fixe et non modifiable</p>
+          {saved && <p className="ok-text">{saved}</p>}
         </section>
 
         <section className="inline-card">
@@ -115,17 +80,6 @@ export default function SettingsPage() {
         </section>
 
         <section className="inline-card">
-          <p className="section-title">Securite active</p>
-          {securityFeatures.map((feature) => (
-            <div key={feature} className="security-feature">
-              <span className="security-feature-dot" />
-              <span className="security-feature-text">{feature}</span>
-              <span className="security-feature-badge">Actif</span>
-            </div>
-          ))}
-        </section>
-
-        <section className="inline-card">
           <button
             className="ghost-secondary"
             type="button"
@@ -134,8 +88,6 @@ export default function SettingsPage() {
               if (session) await logoutUser(session);
               if (userId) await wipeLocalKeys(userId);
               clearSession();
-              window.localStorage.removeItem('ghost_profile_name');
-              window.localStorage.removeItem('ghost_profile_status');
               router.replace('/login');
             }}
           >
@@ -154,8 +106,6 @@ export default function SettingsPage() {
                 const count = await logoutAllDevices(session);
                 if (userId) await wipeLocalKeys(userId);
                 clearSession();
-                window.localStorage.removeItem('ghost_profile_name');
-                window.localStorage.removeItem('ghost_profile_status');
                 setSaved(`${count} session(s) revoquee(s)`);
                 window.setTimeout(() => router.replace('/login'), 1500);
               } catch {
@@ -170,18 +120,21 @@ export default function SettingsPage() {
             type="button"
             style={{ marginTop: '0.5rem', color: 'var(--danger, #e53e3e)' }}
             onClick={async () => {
-              const ok = window.confirm('Effacer toutes les cles de cet appareil ? Vous ne pourrez plus dechiffrer les anciens messages sur cet appareil.');
+              const ok = window.confirm('Supprimer definitivement ce compte ? Cette action est irreversible et vous deconnectera de tous vos appareils.');
               if (!ok) return;
-              if (userId) await wipeLocalKeys(userId);
               const session = getSession();
-              if (session) await logoutUser(session);
-              clearSession();
-              window.localStorage.removeItem('ghost_profile_name');
-              window.localStorage.removeItem('ghost_profile_status');
-              router.replace('/login');
+              if (!session) return;
+              try {
+                await deleteAccount(session);
+                if (userId) await wipeLocalKeys(userId);
+                clearSession();
+                router.replace('/login');
+              } catch {
+                setSaved('Erreur lors de la suppression du compte');
+              }
             }}
           >
-            Effacer les cles (wipe appareil)
+            Supprimer definitivement son compte
           </button>
         </section>
 

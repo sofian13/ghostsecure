@@ -185,6 +185,14 @@ export async function logoutAllDevices(session: Session): Promise<number> {
   return data.sessionsRevoked;
 }
 
+export async function deleteAccount(session: Session): Promise<void> {
+  await apiRequest<{ ok: boolean }>(
+    '/api/auth/account',
+    { method: 'DELETE' },
+    session
+  );
+}
+
 export async function fetchConversations(session: Session): Promise<Conversation[]> {
   return apiRequest<Conversation[]>('/api/conversations', { method: 'GET' }, session);
 }

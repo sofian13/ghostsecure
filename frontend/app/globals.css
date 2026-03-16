@@ -118,12 +118,62 @@ select {
 .ghost {
   position: absolute;
   bottom: -90px;
-  border-radius: var(--radius-full) var(--radius-full) var(--radius-xl) var(--radius-xl);
+  border-radius: 999px 999px 26px 26px;
   background:
-    radial-gradient(circle at 42% 25%, rgba(255, 255, 255, 0.78), rgba(177, 235, 255, 0.17) 56%, transparent 69%),
-    linear-gradient(180deg, rgba(184, 230, 255, 0.5), rgba(89, 157, 255, 0.1));
-  box-shadow: 0 0 36px rgba(118, 202, 255, 0.16);
+    radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.95), rgba(188, 237, 255, 0.34) 45%, rgba(77, 140, 255, 0.08) 68%, transparent 72%),
+    linear-gradient(180deg, rgba(218, 247, 255, 0.72), rgba(126, 196, 255, 0.22) 58%, rgba(67, 121, 214, 0.08));
+  box-shadow: 0 0 42px rgba(118, 202, 255, 0.2);
+  overflow: hidden;
   animation: ghost-rise linear infinite;
+}
+
+.ghost::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -4px 0;
+  height: 28%;
+  background:
+    radial-gradient(circle at 14% 0, rgba(255, 255, 255, 0.9) 0 20%, transparent 21%),
+    radial-gradient(circle at 36% 0, rgba(255, 255, 255, 0.9) 0 20%, transparent 21%),
+    radial-gradient(circle at 58% 0, rgba(255, 255, 255, 0.9) 0 20%, transparent 21%),
+    radial-gradient(circle at 82% 0, rgba(255, 255, 255, 0.9) 0 20%, transparent 21%);
+  opacity: 0.55;
+}
+
+.ghost-eye,
+.ghost-mouth {
+  position: absolute;
+  display: block;
+}
+
+.ghost-eye {
+  top: 26%;
+  width: 13%;
+  height: 18%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 45% 42%, #0f1724 0 36%, rgba(25, 34, 48, 0.88) 37% 72%, transparent 73%),
+    radial-gradient(circle at 42% 40%, rgba(255, 255, 255, 0.85) 0 12%, transparent 13%);
+  box-shadow: 0 0 10px rgba(87, 171, 255, 0.3);
+}
+
+.ghost-eye-left {
+  left: 30%;
+}
+
+.ghost-eye-right {
+  right: 30%;
+}
+
+.ghost-mouth {
+  top: 45%;
+  left: 50%;
+  width: 18%;
+  height: 9%;
+  transform: translateX(-50%);
+  border-radius: 0 0 999px 999px;
+  background: radial-gradient(circle at 50% 0, rgba(10, 18, 28, 0.9), rgba(36, 50, 72, 0.2) 80%, transparent 81%);
+  opacity: 0.42;
 }
 
 @keyframes ghost-rise {
@@ -1463,6 +1513,185 @@ select {
   color: var(--text);
 }
 
+.call-stage {
+  position: relative;
+  overflow: hidden;
+  justify-items: center;
+  padding: var(--sp-6) var(--sp-4);
+  min-height: 420px;
+  background:
+    radial-gradient(circle at 50% 0, rgba(96, 178, 255, 0.2), transparent 38%),
+    linear-gradient(180deg, rgba(12, 18, 29, 0.9), rgba(22, 33, 48, 0.82));
+}
+
+:root[data-theme='light'] .call-stage {
+  background:
+    radial-gradient(circle at 50% 0, rgba(96, 178, 255, 0.18), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(238, 245, 252, 0.96));
+}
+
+.call-stage-orbit {
+  position: absolute;
+  inset: 28px 50% auto;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(circle, rgba(112, 194, 255, 0.2), transparent 62%),
+    radial-gradient(circle, rgba(255, 255, 255, 0.14), transparent 70%);
+  filter: blur(4px);
+}
+
+.call-stage-avatar {
+  position: relative;
+  z-index: 1;
+  width: 116px;
+  height: 116px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 2.3rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(145deg, var(--accent), var(--accent-ghost));
+  box-shadow: 0 18px 36px rgba(41, 110, 189, 0.32);
+}
+
+.call-stage-kicker {
+  position: relative;
+  z-index: 1;
+  margin-top: var(--sp-3);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.call-stage h2 {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(1.8rem, 1.5rem + 1vw, 2.4rem);
+  text-align: center;
+  word-break: break-word;
+}
+
+.call-stage-status {
+  position: relative;
+  z-index: 1;
+  max-width: 28ch;
+  text-align: center;
+  line-height: 1.45;
+}
+
+.call-action-grid {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.call-action-button {
+  min-height: 88px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(34, 46, 63, 0.74);
+  color: var(--text);
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.call-action-button.active {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--line));
+  background: linear-gradient(145deg, rgba(59, 124, 196, 0.48), rgba(67, 84, 204, 0.34));
+}
+
+.call-action-button .icon-svg {
+  width: 22px;
+  height: 22px;
+}
+
+.call-action-button span {
+  font-size: var(--text-sm);
+}
+
+.call-voice-strip {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.call-voice-chip {
+  min-height: 54px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(22, 31, 44, 0.72);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  text-align: center;
+}
+
+.call-voice-chip.active {
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--line));
+  background: linear-gradient(145deg, rgba(74, 143, 222, 0.3), rgba(92, 95, 212, 0.28));
+}
+
+.call-primary-row {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.call-start-button,
+.call-hangup-button {
+  min-height: 62px;
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+}
+
+.call-start-button {
+  background: linear-gradient(145deg, #39c16c, #1f9b63);
+  box-shadow: 0 14px 28px rgba(35, 128, 76, 0.28);
+}
+
+.call-hangup-button {
+  background: linear-gradient(145deg, #f26b7d, #d6405f);
+  box-shadow: 0 14px 28px rgba(170, 39, 73, 0.28);
+}
+
+.call-start-button.wide,
+.call-hangup-button.wide {
+  grid-column: 1 / -1;
+}
+
+.call-start-button .icon-svg,
+.call-hangup-button .icon-svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
 /* ===== SECURITY SHELL ===== */
 .security-shell {
   position: relative;
@@ -1574,6 +1803,12 @@ select {
 
   .fab {
     right: calc((100vw - min(720px, 100vw)) / 2 + 18px);
+  }
+}
+
+@media (max-width: 767px) {
+  .lock-toggle {
+    display: none;
   }
 }
 
