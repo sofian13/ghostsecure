@@ -17,6 +17,8 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api')]
 class ConversationController
 {
+    private const ALLOWED_DISAPPEARING_TIMERS = [0, 1800, 3600, 86400, 604800];
+
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly AuthService $auth,
@@ -38,14 +40,14 @@ class ConversationController
             return $this->json->error('Unauthorized.', 401);
         }
         $rows = $this->em->getConnection()->fetchAllAssociative(
-            'SELECT c.id, c.kind, c.title, MAX(m.created_at) AS updated_at,
+            'SELECT c.id, c.kind, c.title, c.disappearing_timer_seconds, MAX(m.created_at) AS updated_at,
                     COUNT(DISTINCT cm_all.user_id) AS member_count
              FROM conversation c
              INNER JOIN conversation_member cm ON cm.conversation_id = c.id
              INNER JOIN conversation_member cm_all ON cm_all.conversation_id = c.id
              LEFT JOIN message m ON m.conversation_id = c.id
              WHERE cm.user_id = :uid
-             GROUP BY c.id, c.kind, c.title
+             GROUP BY c.id, c.kind, c.title, c.disappearing_timer_seconds
              ORDER BY updated_at DESC NULLS LAST, c.id DESC',
             ['uid' => $me->getId()]
         );
@@ -76,6 +78,7 @@ class ConversationController
                 'kind' => $isGroup ? Conversation::KIND_GROUP : Conversation::KIND_DIRECT,
                 'title' => $isGroup ? ($groupLabel !== '' ? $groupLabel : 'Groupe') : null,
                 'memberCount' => $memberCount,
+                'disappearingTimerSeconds' => $this->normalizeDisappearingTimer((int) ($row['disappearing_timer_seconds'] ?? Conversation::DEFAULT_DISAPPEARING_TIMER_SECONDS)),
                 'peerId' => $isGroup ? ($groupLabel !== '' ? $groupLabel : 'Groupe') : $peer['id'],
                 'peerPublicKey' => $isGroup ? null : $peer['public_key'],
                 'updatedAt' => $row['updated_at'] ?? (new \DateTimeImmutable())->format(DATE_ATOM),
@@ -156,7 +159,47 @@ class ConversationController
             'id' => $id,
             'kind' => $conversation->getKind(),
             'title' => $conversation->getTitle(),
+            'disappearingTimerSeconds' => $this->normalizeDisappearingTimer($conversation->getDisappearingTimerSeconds()),
             'participants' => $participants,
+        ]);
+    }
+
+    #[Route('/conversations/{id}/settings', name: 'api_conversations_update_settings', methods: ['PATCH', 'OPTIONS'])]
+    public function updateSettings(Request $request, string $id)
+    {
+        if ($request->isMethod('OPTIONS')) {
+            return $this->json->ok(['ok' => true]);
+        }
+
+        $me = $this->auth->requireUser($request);
+        if (!$me instanceof User) {
+            return $this->json->error('Unauthorized.', 401);
+        }
+        if (!$this->hasAccess($me->getId(), $id)) {
+            return $this->json->error('Forbidden.', 403);
+        }
+
+        $payload = json_decode($request->getContent(), true);
+        if (!is_array($payload)) {
+            return $this->json->error('Invalid JSON body.', 400);
+        }
+
+        $conversation = $this->em->getRepository(Conversation::class)->find($id);
+        if (!$conversation instanceof Conversation) {
+            return $this->json->error('Conversation not found.', 404);
+        }
+
+        $nextTimer = (int) ($payload['disappearingTimerSeconds'] ?? Conversation::DEFAULT_DISAPPEARING_TIMER_SECONDS);
+        if (!in_array($nextTimer, self::ALLOWED_DISAPPEARING_TIMERS, true)) {
+            return $this->json->error('Invalid disappearing timer.', 422);
+        }
+
+        $conversation->setDisappearingTimerSeconds($nextTimer);
+        $this->em->flush();
+
+        return $this->json->ok([
+            'ok' => true,
+            'disappearingTimerSeconds' => $conversation->getDisappearingTimerSeconds(),
         ]);
     }
 
@@ -378,9 +421,13 @@ class ConversationController
             }
         }
 
+        $resolvedTimer = $this->normalizeDisappearingTimer($expiresInSeconds > 0
+            ? $expiresInSeconds
+            : $conversation->getDisappearingTimerSeconds());
+
         $expiresAt = null;
-        if ($expiresInSeconds > 0) {
-            $expiresAt = new \DateTimeImmutable(sprintf('+%d seconds', min($expiresInSeconds, 86400)));
+        if ($resolvedTimer > 0) {
+            $expiresAt = new \DateTimeImmutable(sprintf('+%d seconds', $resolvedTimer));
         }
 
         $ephemeralPublicKey = trim((string) ($payload['ephemeralPublicKey'] ?? ''));
@@ -439,6 +486,15 @@ class ConversationController
         }
         $value = (int) $raw;
         return $value > 0 ? $value : $default;
+    }
+
+    private function normalizeDisappearingTimer(int $value): int
+    {
+        if (in_array($value, self::ALLOWED_DISAPPEARING_TIMERS, true)) {
+            return $value;
+        }
+
+        return Conversation::DEFAULT_DISAPPEARING_TIMER_SECONDS;
     }
 
     private function createDirectConversation(User $me, array $payload)

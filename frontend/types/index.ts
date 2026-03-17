@@ -20,6 +20,7 @@ export type Conversation = {
   kind: 'direct' | 'group';
   title: string | null;
   memberCount: number;
+  disappearingTimerSeconds: 0 | 1800 | 3600 | 86400 | 604800;
   peerId: string;
   peerPublicKey: string | null;
   updatedAt: string;
@@ -50,5 +51,6 @@ export type ConversationDetail = {
   id: string;
   kind: 'direct' | 'group';
   title: string | null;
+  disappearingTimerSeconds: 0 | 1800 | 3600 | 86400 | 604800;
   participants: UserProfile[];
 };

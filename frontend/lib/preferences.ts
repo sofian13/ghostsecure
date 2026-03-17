@@ -84,6 +84,16 @@ export function updateGhostPreferences(patch: Partial<GhostPreferences>): GhostP
   return next;
 }
 
+export function resetGhostPreferences(): GhostPreferences {
+  cachedPreferences = DEFAULTS;
+  hydrated = true;
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(KEY);
+    window.dispatchEvent(new CustomEvent('ghost-preferences-change'));
+  }
+  return cachedPreferences;
+}
+
 export function subscribeGhostPreferences(listener: () => void): () => void {
   if (typeof window === 'undefined') return () => undefined;
   const onStorage = (event: StorageEvent) => {

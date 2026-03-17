@@ -6,7 +6,8 @@ import SecurityShell from '@/components/SecurityShell';
 import MobileTabs from '@/components/MobileTabs';
 import { deleteAccount, logoutAllDevices, logoutUser } from '@/lib/api';
 import { wipeLocalKeys } from '@/lib/crypto';
-import { describeDisappearingTimer, updateGhostPreferences, useGhostPreferences } from '@/lib/preferences';
+import { idbClearAll } from '@/lib/idb';
+import { describeDisappearingTimer, resetGhostPreferences, updateGhostPreferences, useGhostPreferences } from '@/lib/preferences';
 import { clearSession, getSession } from '@/lib/session';
 
 type ThemeMode = 'dark' | 'light';
@@ -64,6 +65,15 @@ export default function SettingsPage() {
   useEffect(() => () => {
     if (savedTimerRef.current) window.clearTimeout(savedTimerRef.current);
   }, []);
+
+  const wipeDeviceData = async (targetUserId?: string | null) => {
+    if (targetUserId) {
+      await wipeLocalKeys(targetUserId);
+    }
+    await idbClearAll();
+    resetGhostPreferences();
+    window.localStorage.removeItem('ghost_theme');
+  };
 
   const onSwitchTheme = () => {
     const next: ThemeMode = theme === 'dark' ? 'light' : 'dark';
@@ -235,18 +245,19 @@ export default function SettingsPage() {
 
         <section className="inline-card danger-zone">
           <p className="section-title">Compte</p>
+          <p className="muted-text">Ces actions retirent soit la session courante, soit toutes les sessions, soit l ensemble du compte avec ses conversations et donnees locales.</p>
           <button
             className="ghost-secondary"
             type="button"
             onClick={async () => {
               const session = getSession();
               if (session) await logoutUser(session);
-              if (userId) await wipeLocalKeys(userId);
+              await wipeDeviceData(userId);
               clearSession();
               router.replace('/login');
             }}
           >
-            Deconnexion
+            Deconnexion de cet appareil
           </button>
           <button
             className="ghost-secondary"
@@ -255,11 +266,11 @@ export default function SettingsPage() {
             onClick={async () => {
               const session = getSession();
               if (!session) return;
-              const ok = window.confirm('Deconnecter tous les appareils ? Vous devrez vous reconnecter partout.');
+              const ok = window.confirm('Deconnecter tous les appareils ? Toutes les sessions actives seront revoquees.');
               if (!ok) return;
               try {
                 const count = await logoutAllDevices(session);
-                if (userId) await wipeLocalKeys(userId);
+                await wipeDeviceData(userId);
                 clearSession();
                 setSaved(`${count} session(s) revoquee(s)`);
                 window.setTimeout(() => router.replace('/login'), 1500);
@@ -275,13 +286,13 @@ export default function SettingsPage() {
             type="button"
             style={{ marginTop: '0.5rem', color: 'var(--danger, #e53e3e)' }}
             onClick={async () => {
-              const ok = window.confirm('Supprimer definitivement ce compte ? Cette action est irreversible et vous deconnectera de tous vos appareils.');
+              const ok = window.confirm('Supprimer definitivement le compte, les conversations, les messages, les demandes, les appels et les donnees de cet appareil ? Cette action est irreversible.');
               if (!ok) return;
               const session = getSession();
               if (!session) return;
               try {
                 await deleteAccount(session);
-                if (userId) await wipeLocalKeys(userId);
+                await wipeDeviceData(userId);
                 clearSession();
                 router.replace('/login');
               } catch {
@@ -289,7 +300,7 @@ export default function SettingsPage() {
               }
             }}
           >
-            Supprimer definitivement son compte
+            Supprimer tout definitivement
           </button>
         </section>
 

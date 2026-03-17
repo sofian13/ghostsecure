@@ -228,6 +228,21 @@ export async function fetchConversationDetail(session: Session, conversationId: 
   return apiRequest<ConversationDetail>(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: 'GET' }, session);
 }
 
+export async function updateConversationSettings(
+  session: Session,
+  conversationId: string,
+  payload: { disappearingTimerSeconds: 0 | 1800 | 3600 | 86400 | 604800 }
+): Promise<{ disappearingTimerSeconds: 0 | 1800 | 3600 | 86400 | 604800 }> {
+  return apiRequest<{ disappearingTimerSeconds: 0 | 1800 | 3600 | 86400 | 604800 }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/settings`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+    session
+  );
+}
+
 export async function fetchMessages(session: Session, conversationId: string, limit?: number): Promise<EncryptedMessage[]> {
   const query = limit ? `?limit=${limit}` : '';
   const rows = await apiRequest<EncryptedMessage[]>(

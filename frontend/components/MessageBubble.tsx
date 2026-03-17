@@ -25,7 +25,7 @@ type Props = {
 };
 
 const SAFE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-const SAFE_AUDIO_TYPES = new Set(['audio/webm', 'audio/mp4', 'audio/mpeg']);
+const SAFE_AUDIO_TYPES = new Set(['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/wav']);
 
 function sanitizeMime(mime: string, kind: 'image' | 'audio' | 'file'): string {
   const lower = mime.toLowerCase();

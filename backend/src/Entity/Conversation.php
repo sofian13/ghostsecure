@@ -10,6 +10,7 @@ class Conversation
 {
     public const KIND_DIRECT = 'direct';
     public const KIND_GROUP = 'group';
+    public const DEFAULT_DISAPPEARING_TIMER_SECONDS = 3600;
 
     #[ORM\Id]
     #[ORM\Column(type: 'string', length: 36)]
@@ -24,12 +25,21 @@ class Conversation
     #[ORM\Column(type: 'datetime_immutable')]
     private \DateTimeImmutable $createdAt;
 
-    public function __construct(string $id, string $kind = self::KIND_DIRECT, ?string $title = null)
+    #[ORM\Column(type: 'integer', options: ['default' => self::DEFAULT_DISAPPEARING_TIMER_SECONDS])]
+    private int $disappearingTimerSeconds;
+
+    public function __construct(
+        string $id,
+        string $kind = self::KIND_DIRECT,
+        ?string $title = null,
+        int $disappearingTimerSeconds = self::DEFAULT_DISAPPEARING_TIMER_SECONDS
+    )
     {
         $this->id = $id;
         $this->kind = $kind;
         $this->title = $title;
         $this->createdAt = new \DateTimeImmutable();
+        $this->disappearingTimerSeconds = $disappearingTimerSeconds;
     }
 
     public function getId(): string
@@ -50,5 +60,15 @@ class Conversation
     public function getTitle(): ?string
     {
         return $this->title;
+    }
+
+    public function getDisappearingTimerSeconds(): int
+    {
+        return $this->disappearingTimerSeconds;
+    }
+
+    public function setDisappearingTimerSeconds(int $disappearingTimerSeconds): void
+    {
+        $this->disappearingTimerSeconds = $disappearingTimerSeconds;
     }
 }

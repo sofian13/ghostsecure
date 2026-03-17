@@ -5,17 +5,25 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import SecurityShell from '@/components/SecurityShell';
 import MessageBubble from '@/components/MessageBubble';
 import { getSession } from '@/lib/session';
-import { addGroupMember, fetchConversationDetail, fetchMessages, fetchPreKeyBundle, leaveGroupConversation, sendMessage } from '@/lib/api';
+import { addGroupMember, fetchConversationDetail, fetchMessages, fetchPreKeyBundle, leaveGroupConversation, sendMessage, updateConversationSettings } from '@/lib/api';
 import { encryptForParticipants } from '@/lib/crypto';
 import { decryptForUser, type DecryptedMessage } from '@/lib/messages';
 import { describeDisappearingTimer, useGhostPreferences } from '@/lib/preferences';
 import { hasRatchetSession, createOutboundSession, encryptRatchet } from '@/lib/ratchet';
 import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
+import { type VoicePresetId, VOICE_PRESETS, transformVoiceBlob } from '@/lib/voice';
 import type { EncryptedMessage, Session } from '@/types';
 
 const MESSAGE_POLL_INTERVAL_MS = 1_500;
 const MAX_POLL_INTERVAL_MS = 120_000;
+const DISAPPEARING_OPTIONS: Array<{ value: 0 | 1800 | 3600 | 86400 | 604800; label: string }> = [
+  { value: 0, label: 'Off' },
+  { value: 1800, label: '30 min' },
+  { value: 3600, label: '1 h' },
+  { value: 86400, label: '24 h' },
+  { value: 604800, label: '7 j' },
+];
 
 export default function ConversationPage() {
   const params = useParams<{ id: string }>();
@@ -35,9 +43,15 @@ export default function ConversationPage() {
   const [recording, setRecording] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
   const [draftVoiceUrl, setDraftVoiceUrl] = useState<string | null>(null);
+  const [draftVoiceSourceBlob, setDraftVoiceSourceBlob] = useState<Blob | null>(null);
   const [draftVoiceBlob, setDraftVoiceBlob] = useState<Blob | null>(null);
   const [draftVoiceMime, setDraftVoiceMime] = useState<string>('audio/webm');
   const [draftVoiceDurationMs, setDraftVoiceDurationMs] = useState(0);
+  const [draftVoicePreset, setDraftVoicePreset] = useState<VoicePresetId>('natural');
+  const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const [conversationTimer, setConversationTimer] = useState<0 | 1800 | 3600 | 86400 | 604800>(preferences.disappearingTimerSeconds);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   const dismissedCallInvitesRef = useRef<Set<string>>(new Set());
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -47,6 +61,7 @@ export default function ConversationPage() {
   const recordStartRef = useRef<number>(0);
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const voiceDraftTaskRef = useRef(0);
 
   useEffect(() => {
     const s = getSession();
@@ -62,6 +77,7 @@ export default function ConversationPage() {
     detailRef.current = detail;
     detailFetchedAtRef.current = Date.now();
     setConversationKind(detail.kind);
+    setConversationTimer(detail.disappearingTimerSeconds);
     if (detail.kind === 'group') {
       setPeerId(detail.title?.trim() || 'Groupe');
       return;
@@ -247,7 +263,7 @@ export default function ConversationPage() {
           const encrypted = await encryptRatchet(s.userId, conversationId, plaintext, s.userId, peer.id);
           const sent = await sendMessage(s, conversationId, {
             ...encrypted,
-            expiresInSeconds: preferences.disappearingTimerSeconds > 0 ? preferences.disappearingTimerSeconds : undefined,
+            expiresInSeconds: conversationTimer > 0 ? conversationTimer : undefined,
           });
           return buildSenderMessage(sent, s.userId, plaintext);
         }
@@ -268,7 +284,7 @@ export default function ConversationPage() {
     console.debug('[GS:send] wrappedKeys:', Object.keys(encrypted.wrappedKeys), 'hasEphemeral:', !!encrypted.ephemeralPublicKey);
     const sent = await sendMessage(s, conversationId, {
       ...encrypted,
-      expiresInSeconds: preferences.disappearingTimerSeconds > 0 ? preferences.disappearingTimerSeconds : undefined,
+      expiresInSeconds: conversationTimer > 0 ? conversationTimer : undefined,
     });
     return buildSenderMessage(sent, s.userId, plaintext);
   };
@@ -306,11 +322,16 @@ export default function ConversationPage() {
       recorderRef.current = recorder;
       recordChunksRef.current = [];
       recordStartRef.current = Date.now();
+      setError(null);
       setRecordingMs(0);
       setRecording(true);
 
       recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) recordChunksRef.current.push(event.data);
+      };
+      recorder.onerror = () => {
+        setError('Enregistrement vocal interrompu');
+        cleanupVoiceRecorder();
       };
       recorder.start(250);
       recordTimerRef.current = window.setInterval(() => {
@@ -325,23 +346,30 @@ export default function ConversationPage() {
     if (!recording || !session || !recorderRef.current) return;
 
     try {
-      const blob = await new Promise<Blob>((resolve) => {
+      const blob = await new Promise<Blob>((resolve, reject) => {
         const rec = recorderRef.current!;
+        const timeout = window.setTimeout(() => reject(new Error('recording timeout')), 4000);
         rec.onstop = () => {
-          resolve(new Blob(recordChunksRef.current, { type: rec.mimeType || 'audio/webm' }));
+          window.clearTimeout(timeout);
+          const result = new Blob(recordChunksRef.current, { type: rec.mimeType || 'audio/webm' });
+          if (result.size === 0) {
+            reject(new Error('empty recording'));
+            return;
+          }
+          resolve(result);
         };
+        rec.onerror = () => {
+          window.clearTimeout(timeout);
+          reject(new Error('recording failed'));
+        };
+        rec.requestData();
         rec.stop();
       });
 
       const duration = Math.max(800, Date.now() - recordStartRef.current);
-      const nextUrl = URL.createObjectURL(blob);
-      if (draftVoiceUrl) URL.revokeObjectURL(draftVoiceUrl);
-      setDraftVoiceBlob(blob);
-      setDraftVoiceMime(blob.type || 'audio/webm');
-      setDraftVoiceDurationMs(duration);
-      setDraftVoiceUrl(nextUrl);
+      await prepareVoiceDraft(blob, duration, 'natural');
     } catch {
-      setError("Erreur d'envoi vocal");
+      setError('Erreur de preparation du vocal');
     } finally {
       cleanupVoiceRecorder();
     }
@@ -400,9 +428,12 @@ export default function ConversationPage() {
   const discardDraftVoice = () => {
     if (draftVoiceUrl) URL.revokeObjectURL(draftVoiceUrl);
     setDraftVoiceUrl(null);
+    setDraftVoiceSourceBlob(null);
     setDraftVoiceBlob(null);
     setDraftVoiceDurationMs(0);
     setDraftVoiceMime('audio/webm');
+    setDraftVoicePreset('natural');
+    setVoiceProcessing(false);
   };
 
   const cleanupVoiceRecorder = () => {
@@ -474,6 +505,33 @@ export default function ConversationPage() {
 
   if (!session) return <main className="centered">Chargement...</main>;
 
+  async function prepareVoiceDraft(blob: Blob, durationMs: number, presetId: VoicePresetId) {
+    const taskId = Date.now();
+    voiceDraftTaskRef.current = taskId;
+    setVoiceProcessing(true);
+    setDraftVoiceSourceBlob(blob);
+    setDraftVoicePreset(presetId);
+    try {
+      const processed = await transformVoiceBlob(blob, presetId);
+      if (voiceDraftTaskRef.current !== taskId) return;
+      const nextUrl = URL.createObjectURL(processed);
+      setDraftVoiceUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return nextUrl;
+      });
+      setDraftVoiceBlob(processed);
+      setDraftVoiceMime(processed.type || blob.type || 'audio/webm');
+      setDraftVoiceDurationMs(durationMs);
+    } catch {
+      if (voiceDraftTaskRef.current !== taskId) return;
+      setError('Erreur traitement vocal');
+    } finally {
+      if (voiceDraftTaskRef.current === taskId) {
+        setVoiceProcessing(false);
+      }
+    }
+  }
+
   return (
     <SecurityShell userId={session.userId}>
       <main className="mobile-conversation">
@@ -484,9 +542,17 @@ export default function ConversationPage() {
           <div className="conv-avatar" aria-hidden="true">{peerId.slice(0, 1).toUpperCase()}</div>
           <div className="conv-header-info">
             <strong>{peerId || 'Contact'}</strong>
-            <span>{status}</span>
+            <span>{status} · {describeDisappearingTimer(conversationTimer)}</span>
           </div>
           <div className="conv-header-actions">
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Parametres de la conversation"
+            >
+              <TuneIcon />
+            </button>
             {conversationKind !== 'group' && (
               <button
                 type="button"
@@ -558,9 +624,7 @@ export default function ConversationPage() {
 
         <section className="message-thread" ref={listRef}>
           <div className="security-pill">Chiffrement de bout en bout active</div>
-          {preferences.disappearingTimerSeconds > 0 && (
-            <div className="security-pill secondary">Messages ephemeres: {describeDisappearingTimer(preferences.disappearingTimerSeconds)}</div>
-          )}
+          <div className="security-pill secondary">Messages ephemeres: {describeDisappearingTimer(conversationTimer)}</div>
 
           {messages.length === 0 && (
             <div className="conv-empty">
@@ -592,12 +656,32 @@ export default function ConversationPage() {
         {draftVoiceUrl && (
           <section className="voice-draft">
             <audio controls preload="metadata" src={draftVoiceUrl} />
-            <p className="muted-text">Vocal: {Math.max(1, Math.round(draftVoiceDurationMs / 1000))}s</p>
+            <p className="muted-text">
+              Vocal: {Math.max(1, Math.round(draftVoiceDurationMs / 1000))}s · Voix {VOICE_PRESETS.find((preset) => preset.id === draftVoicePreset)?.label.toLowerCase()}
+            </p>
+            <div className="voice-presets">
+              {VOICE_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={`voice-preset-card ${draftVoicePreset === preset.id ? 'active' : ''}`}
+                  onClick={() => {
+                    if (!draftVoiceSourceBlob || voiceProcessing || draftVoicePreset === preset.id) return;
+                    void prepareVoiceDraft(draftVoiceSourceBlob, draftVoiceDurationMs, preset.id);
+                  }}
+                  disabled={voiceProcessing}
+                >
+                  <span className="preset-emoji" aria-hidden="true">{preset.emoji}</span>
+                  <span className="preset-label">{preset.label}</span>
+                </button>
+              ))}
+            </div>
+            {voiceProcessing && <p className="muted-text">Traitement du vocal...</p>}
             <div className="row">
               <button type="button" className="ghost-secondary" onClick={discardDraftVoice}>
                 Ne pas envoyer
               </button>
-              <button type="button" className="ghost-primary" onClick={sendDraftVoice}>
+              <button type="button" className="ghost-primary" onClick={sendDraftVoice} disabled={voiceProcessing}>
                 Envoyer le vocal
               </button>
             </div>
@@ -632,6 +716,48 @@ export default function ConversationPage() {
           />
           {rightAction}
         </form>
+
+        {settingsOpen && (
+          <div className="sheet-backdrop" onClick={() => setSettingsOpen(false)}>
+            <section className="sheet" onClick={(event) => event.stopPropagation()}>
+              <h2>Parametres de la discussion</h2>
+              <p className="muted-text">Le timer choisi s applique aux prochains messages de cette conversation.</p>
+              <div className="settings-chip-row">
+                {DISAPPEARING_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`settings-chip ${conversationTimer === option.value ? 'active' : ''}`}
+                    disabled={settingsSaving}
+                    onClick={async () => {
+                      if (!session || settingsSaving || conversationTimer === option.value) return;
+                      setSettingsSaving(true);
+                      try {
+                        const result = await updateConversationSettings(session, conversationId, { disappearingTimerSeconds: option.value });
+                        setConversationTimer(result.disappearingTimerSeconds);
+                        if (detailRef.current) {
+                          detailRef.current = { ...detailRef.current, disappearingTimerSeconds: result.disappearingTimerSeconds };
+                        }
+                        setStatus(`Messages ephemeres: ${describeDisappearingTimer(result.disappearingTimerSeconds)}`);
+                      } catch (err) {
+                        setError(normalizeError(err, 'Erreur mise a jour conversation'));
+                      } finally {
+                        setSettingsSaving(false);
+                      }
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <div className="row">
+                <button type="button" className="ghost-secondary" onClick={() => setSettingsOpen(false)}>
+                  Fermer
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
       </main>
     </SecurityShell>
   );
@@ -762,6 +888,14 @@ function RedoIcon() {
   return (
     <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 5a7 7 0 0 1 6.3 4H21a1 1 0 1 1 0 2h-4a1 1 0 0 1-1-1V6a1 1 0 1 1 2 0v1a9 9 0 1 0 2.5 7.2 1 1 0 1 1 2 .3A11 11 0 1 1 12 5Z" />
+    </svg>
+  );
+}
+
+function TuneIcon() {
+  return (
+    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h9a2.5 2.5 0 1 0 0-2H4a1 1 0 1 0 0 2Zm16 0a1 1 0 1 0 0-2h-1a1 1 0 1 0 0 2h1ZM4 13h3a2.5 2.5 0 1 0 0-2H4a1 1 0 1 0 0 2Zm9 0h7a1 1 0 1 0 0-2h-7a1 1 0 1 0 0 2ZM4 19h11a2.5 2.5 0 1 0 0-2H4a1 1 0 1 0 0 2Zm16 0a1 1 0 1 0 0-2h-3a1 1 0 1 0 0 2h3Z" />
     </svg>
   );
 }
