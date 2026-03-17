@@ -17,6 +17,7 @@ import type { EncryptedMessage, Session } from '@/types';
 
 const MESSAGE_POLL_INTERVAL_MS = 1_500;
 const MAX_POLL_INTERVAL_MS = 120_000;
+const INITIAL_LOAD_RETRY_DELAY_MS = 700;
 const DISAPPEARING_OPTIONS: Array<{ value: 0 | 1800 | 3600 | 86400 | 604800; label: string }> = [
   { value: 0, label: 'Off' },
   { value: 1800, label: '30 min' },
@@ -132,9 +133,28 @@ export default function ConversationPage() {
 
   useEffect(() => {
     if (!session) return;
-    Promise.all([loadContext(session), loadMessages(session)]).catch((e: unknown) => {
-      setError(normalizeError(e, 'Erreur chargement conversation'));
-    });
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      const [contextResult, messagesResult] = await Promise.allSettled([
+        retryAsync(() => loadContext(session), 2, INITIAL_LOAD_RETRY_DELAY_MS),
+        retryAsync(() => loadMessages(session), 2, INITIAL_LOAD_RETRY_DELAY_MS),
+      ]);
+
+      if (cancelled) return;
+
+      if (contextResult.status === 'fulfilled' || messagesResult.status === 'fulfilled') {
+        setError(null);
+        return;
+      }
+
+      setError(normalizeError(contextResult.reason, 'Erreur chargement conversation'));
+    };
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
   }, [session, conversationId]);
 
   useEffect(() => {
@@ -149,7 +169,10 @@ export default function ConversationPage() {
     let timer: number;
     const poll = () => {
       loadMessages(session)
-        .then(() => { delay = MESSAGE_POLL_INTERVAL_MS; })
+        .then(() => {
+          delay = MESSAGE_POLL_INTERVAL_MS;
+          setError((current) => current === 'Erreur chargement conversation' ? null : current);
+        })
         .catch((err: unknown) => {
           if (err instanceof Error && err.message.includes('429')) {
             delay = Math.min(delay * 2, MAX_POLL_INTERVAL_MS);
@@ -171,6 +194,12 @@ export default function ConversationPage() {
       if (draftVoiceUrl) URL.revokeObjectURL(draftVoiceUrl);
     };
   }, [draftVoiceUrl]);
+
+  useEffect(() => {
+    if (!error) return;
+    const timer = window.setTimeout(() => setError(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [error]);
 
   useEffect(() => {
     if (!session) return;
@@ -799,8 +828,25 @@ function normalizeError(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
   const message = err.message.toLowerCase();
   if (message.includes('forbidden')) return 'Action non autorisee.';
+  if (message.includes('internal server error')) return 'Chargement temporairement indisponible.';
   if (message.includes('failed to fetch')) return 'Hors ligne. Reessayez.';
   return fallback;
+}
+
+async function retryAsync<T>(fn: () => Promise<T>, attempts: number, delayMs: number): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1) {
+        break;
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
