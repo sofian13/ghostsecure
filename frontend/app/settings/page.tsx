@@ -101,7 +101,6 @@ export default function SettingsPage() {
         <header className="mobile-header">
           <div>
             <h1>Parametres</h1>
-            <p className="muted-text">Confidentialite, appels et controle local</p>
           </div>
         </header>
 
@@ -121,7 +120,6 @@ export default function SettingsPage() {
             <span className="secure-chip">{describeDisappearingTimer(preferences.disappearingTimerSeconds)}</span>
             <span className="secure-chip">Voix masquee</span>
           </div>
-          <p className="muted-text">Identifiant fixe. Les reglages ci-dessous restent locaux a cet appareil.</p>
           {saved && <p className="ok-text">{saved}</p>}
         </section>
 
@@ -137,19 +135,16 @@ export default function SettingsPage() {
           <div className="pref-stack">
             <PreferenceToggle
               title="Masquer les apercus des messages"
-              description="Le contenu des chats n apparait plus dans la liste principale."
               checked={preferences.hideMessagePreviews}
               onToggle={() => updatePreference('hideMessagePreviews', !preferences.hideMessagePreviews, 'Apercus mis a jour')}
             />
             <PreferenceToggle
               title="Masquer l identite des appels entrants"
-              description="Les notifications et popups d appel restent generiques."
               checked={preferences.hideCallerIdentity}
               onToggle={() => updatePreference('hideCallerIdentity', !preferences.hideCallerIdentity, 'Confidentialite des appels mise a jour')}
             />
             <PreferenceToggle
               title="Garder l ecran allume pendant l usage"
-              description="Pratique pour les appels et longues conversations. Desactivez pour plus de discretion physique."
               checked={preferences.keepScreenAwake}
               onToggle={() => updatePreference('keepScreenAwake', !preferences.keepScreenAwake, 'Preference ecran mise a jour')}
             />
@@ -158,7 +153,6 @@ export default function SettingsPage() {
           <div className="pref-group">
             <div className="pref-group-label">
               <strong>Verrouillage auto apres sortie</strong>
-              <span>Cache l interface au retour au multitache.</span>
             </div>
             <div className="settings-chip-row">
               {AUTO_LOCK_OPTIONS.map((option) => (
@@ -182,7 +176,6 @@ export default function SettingsPage() {
               <strong>Expiration par defaut</strong>
             </div>
           </div>
-          <p className="muted-text">Chaque nouveau message, vocal ou piece jointe peut disparaitre automatiquement.</p>
           <div className="settings-chip-row">
             {DISAPPEARING_OPTIONS.map((option) => (
               <button
@@ -204,7 +197,6 @@ export default function SettingsPage() {
               <strong>Une seule voix masquee, reglable</strong>
             </div>
           </div>
-          <p className="muted-text">Votre voix reste claire, mais plus difficile a reconnaitre.</p>
           <label className="field">
             <span>Niveau de masquage: {draftVoiceMaskAmount}%</span>
             <input
@@ -232,7 +224,6 @@ export default function SettingsPage() {
           <div className="settings-row">
             <div className="settings-row-left">
               <strong>Theme {theme === 'dark' ? 'sombre' : 'clair'}</strong>
-              <span>Basculer entre clair et sombre</span>
             </div>
             <button
               type="button"
@@ -245,7 +236,6 @@ export default function SettingsPage() {
 
         <section className="inline-card danger-zone">
           <p className="section-title">Compte</p>
-          <p className="muted-text">Ces actions retirent soit la session courante, soit toutes les sessions, soit l ensemble du compte avec ses conversations et donnees locales.</p>
           <button
             className="ghost-secondary"
             type="button"
@@ -312,12 +302,10 @@ export default function SettingsPage() {
 
 function PreferenceToggle({
   title,
-  description,
   checked,
   onToggle,
 }: {
   title: string;
-  description: string;
   checked: boolean;
   onToggle: () => void;
 }) {
@@ -325,7 +313,6 @@ function PreferenceToggle({
     <div className="settings-row">
       <div className="settings-row-left">
         <strong>{title}</strong>
-        <span>{description}</span>
       </div>
       <button
         type="button"
