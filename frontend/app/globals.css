@@ -1713,6 +1713,50 @@ select {
   font-size: var(--text-xs);
 }
 
+.vpn-cta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 18px;
+  border: 1px solid rgba(102, 187, 106, 0.3);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(102, 187, 106, 0.12) 0%, rgba(66, 165, 245, 0.10) 100%);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.vpn-cta:active {
+  transform: scale(0.97);
+}
+.vpn-cta-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  fill: #66bb6a;
+}
+.vpn-cta-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.vpn-cta-text strong {
+  font-size: 1rem;
+  color: #66bb6a;
+}
+.vpn-cta-text span {
+  font-size: 0.8rem;
+  opacity: 0.65;
+}
+.vpn-cta-arrow {
+  font-size: 1.5rem;
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+
 .danger-zone {
   border-color: color-mix(in oklab, var(--danger) 30%, var(--line));
 }

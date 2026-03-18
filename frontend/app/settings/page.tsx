@@ -205,6 +205,30 @@ export default function SettingsPage() {
           </div>
         </section>
 
+        <section className="inline-card">
+          <div className="settings-section-head">
+            <div>
+              <p className="section-title">VPN</p>
+              <strong>Protegez votre connexion</strong>
+            </div>
+          </div>
+          <p className="muted-text" style={{ marginBottom: '0.75rem' }}>
+            Activez un VPN avant d utiliser Ghost Secure pour masquer votre adresse IP.
+          </p>
+          <button
+            type="button"
+            className="vpn-cta"
+            onClick={() => window.open('https://protonvpn.com/download', '_blank')}
+          >
+            <VpnShieldIcon />
+            <div className="vpn-cta-text">
+              <strong>ProtonVPN</strong>
+              <span>Gratuit - Serveurs Russie disponibles</span>
+            </div>
+            <span className="vpn-cta-arrow">&#8250;</span>
+          </button>
+        </section>
+
         <section className="inline-card danger-zone">
           <p className="section-title">Compte</p>
           <button
@@ -268,6 +292,14 @@ export default function SettingsPage() {
         <MobileTabs />
       </main>
     </SecurityShell>
+  );
+}
+
+function VpnShieldIcon() {
+  return (
+    <svg className="vpn-cta-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5Zm0 2.18 7 3.82v4c0 4.52-3.13 8.74-7 9.93-3.87-1.2-7-5.41-7-9.93V8l7-3.82Zm-1 5.82v2H9v2h2v2h2v-2h2v-2h-2v-2h-2Z" />
+    </svg>
   );
 }
 
