@@ -74,7 +74,7 @@ export default function SettingsPage() {
     setTheme(next);
     document.documentElement.dataset.theme = next;
     window.localStorage.setItem('ghost_theme', next);
-    flashSaved(`Theme ${next === 'dark' ? 'sombre' : 'clair'} active`);
+    flashSaved(`Thème ${next === 'dark' ? 'sombre' : 'clair'} activé`);
   };
 
   const updatePreference = <K extends keyof typeof preferences>(key: K, value: (typeof preferences)[K], message: string) => {
@@ -84,7 +84,7 @@ export default function SettingsPage() {
 
   const commitVoiceMaskAmount = () => {
     if (draftVoiceMaskAmount === preferences.callVoiceMaskAmount) return;
-    updatePreference('callVoiceMaskAmount', draftVoiceMaskAmount, 'Voix masquee ajustee');
+    updatePreference('callVoiceMaskAmount', draftVoiceMaskAmount, 'Voix masquée ajustée');
   };
 
   if (!userId) return <main className="centered">Chargement...</main>;
@@ -94,7 +94,7 @@ export default function SettingsPage() {
       <main className="mobile-screen settings-mobile settings-redesign">
         <header className="mobile-header">
           <div>
-            <h1>Parametres</h1>
+            <h1>Paramètres</h1>
           </div>
         </header>
 
@@ -114,27 +114,27 @@ export default function SettingsPage() {
         <section className="inline-card">
           <div className="settings-section-head">
             <div>
-              <p className="section-title">Confidentialite</p>
-              <strong>Moins d infos visibles, moins d exposition</strong>
+              <p className="section-title">Confidentialité</p>
+              <strong>Moins d'infos visibles, moins d'exposition</strong>
             </div>
             <span className="secure-badge">Signal-like</span>
           </div>
 
           <div className="pref-stack">
             <PreferenceToggle
-              title="Masquer les apercus des messages"
+              title="Masquer les aperçus des messages"
               checked={preferences.hideMessagePreviews}
-              onToggle={() => updatePreference('hideMessagePreviews', !preferences.hideMessagePreviews, 'Apercus mis a jour')}
+              onToggle={() => updatePreference('hideMessagePreviews', !preferences.hideMessagePreviews, 'Aperçus mis à jour')}
             />
             <PreferenceToggle
-              title="Masquer l identite des appels entrants"
+              title="Masquer l'identité des appels entrants"
               checked={preferences.hideCallerIdentity}
-              onToggle={() => updatePreference('hideCallerIdentity', !preferences.hideCallerIdentity, 'Confidentialite des appels mise a jour')}
+              onToggle={() => updatePreference('hideCallerIdentity', !preferences.hideCallerIdentity, 'Confidentialité des appels mise à jour')}
             />
             <PreferenceToggle
-              title="Garder l ecran allume pendant l usage"
+              title="Garder l'écran allumé pendant l'usage"
               checked={preferences.keepScreenAwake}
-              onToggle={() => updatePreference('keepScreenAwake', !preferences.keepScreenAwake, 'Preference ecran mise a jour')}
+              onToggle={() => updatePreference('keepScreenAwake', !preferences.keepScreenAwake, 'Préférence écran mise à jour')}
             />
           </div>
 
@@ -144,7 +144,7 @@ export default function SettingsPage() {
           <div className="settings-section-head">
             <div>
               <p className="section-title">Messages</p>
-              <strong>Expiration par defaut</strong>
+              <strong>Expiration par défaut</strong>
             </div>
           </div>
           <div className="settings-chip-row">
@@ -153,7 +153,7 @@ export default function SettingsPage() {
                 key={option.value}
                 type="button"
                 className={`settings-chip ${preferences.disappearingTimerSeconds === option.value ? 'active' : ''}`}
-                onClick={() => updatePreference('disappearingTimerSeconds', option.value, `Messages ephemeres: ${describeDisappearingTimer(option.value)}`)}
+                onClick={() => updatePreference('disappearingTimerSeconds', option.value, `Messages éphémères : ${describeDisappearingTimer(option.value)}`)}
               >
                 {option.label}
               </button>
@@ -165,7 +165,7 @@ export default function SettingsPage() {
           <div className="settings-section-head">
             <div>
               <p className="section-title">Appels</p>
-              <strong>Une seule voix masquee, reglable</strong>
+              <strong>Une seule voix masquée, réglable</strong>
             </div>
           </div>
           <label className="field">
@@ -194,7 +194,7 @@ export default function SettingsPage() {
           <p className="section-title">Affichage</p>
           <div className="settings-row">
             <div className="settings-row-left">
-              <strong>Theme {theme === 'dark' ? 'sombre' : 'clair'}</strong>
+              <strong>Thème {theme === 'dark' ? 'sombre' : 'clair'}</strong>
             </div>
             <button
               type="button"
@@ -209,11 +209,11 @@ export default function SettingsPage() {
           <div className="settings-section-head">
             <div>
               <p className="section-title">VPN</p>
-              <strong>Protegez votre connexion</strong>
+              <strong>Protégez votre connexion</strong>
             </div>
           </div>
           <p className="muted-text" style={{ marginBottom: '0.75rem' }}>
-            Activez un VPN avant d utiliser Ghost Secure pour masquer votre adresse IP.
+            Activez un VPN avant d'utiliser Ghost Secure pour masquer votre adresse IP.
           </p>
           <button
             type="button"
@@ -242,7 +242,7 @@ export default function SettingsPage() {
               router.replace('/login');
             }}
           >
-            Deconnexion de cet appareil
+            Déconnexion de cet appareil
           </button>
           <button
             className="ghost-secondary"
@@ -251,27 +251,27 @@ export default function SettingsPage() {
             onClick={async () => {
               const session = getSession();
               if (!session) return;
-              const ok = window.confirm('Deconnecter tous les appareils ? Toutes les sessions actives seront revoquees.');
+              const ok = window.confirm('Déconnecter tous les appareils ? Toutes les sessions actives seront révoquées.');
               if (!ok) return;
               try {
                 const count = await logoutAllDevices(session);
                 await wipeDeviceData(userId);
                 clearSession();
-                setSaved(`${count} session(s) revoquee(s)`);
+                setSaved(`${count} session(s) révoquée(s)`);
                 window.setTimeout(() => router.replace('/login'), 1500);
               } catch {
-                setSaved('Erreur lors de la deconnexion');
+                setSaved('Erreur lors de la déconnexion');
               }
             }}
           >
-            Deconnecter tous les appareils
+            Déconnecter tous les appareils
           </button>
           <button
             className="ghost-secondary"
             type="button"
             style={{ marginTop: '0.5rem', color: 'var(--danger, #e53e3e)' }}
             onClick={async () => {
-              const ok = window.confirm('Supprimer definitivement le compte, les conversations, les messages, les demandes, les appels et les donnees de cet appareil ? Cette action est irreversible.');
+              const ok = window.confirm('Supprimer définitivement le compte, les conversations, les messages, les demandes, les appels et les données de cet appareil ? Cette action est irréversible.');
               if (!ok) return;
               const session = getSession();
               if (!session) return;
@@ -285,7 +285,7 @@ export default function SettingsPage() {
               }
             }}
           >
-            Supprimer tout definitivement
+            Supprimer tout définitivement
           </button>
         </section>
 

@@ -199,7 +199,7 @@ export default function SecurityShell({ userId, children }: Props) {
 
       if (typeof Notification !== 'undefined') {
         const show = () => {
-          const body = preferences.hideCallerIdentity ? 'Ouvrez Ghost Secure pour repondre.' : `${fromUserId} vous appelle`;
+          const body = preferences.hideCallerIdentity ? 'Ouvrez Ghost Secure pour répondre.' : `${fromUserId} vous appelle`;
           const n = new Notification('Ghost Secure - Appel entrant', {
             body,
             tag: `call-${inviteId}`,
@@ -266,12 +266,12 @@ export default function SecurityShell({ userId, children }: Props) {
       onDragStart={(e) => e.preventDefault()}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {captureAlert && <div className="capture-alert">Capture detectee. Affichage masque.</div>}
+      {captureAlert && <div className="capture-alert">Capture détectée. Affichage masqué.</div>}
       {incomingCall && (
         <div className="incoming-popup" role="alert" aria-live="assertive">
           <div>
             <strong>Appel entrant</strong>
-            <p>{preferences.hideCallerIdentity ? 'Identite masquee jusqu a ouverture de l appel' : `${incomingCall.fromUserId} vous appelle`}</p>
+            <p>{preferences.hideCallerIdentity ? 'Identité masquée jusqu\'à ouverture de l\'appel' : `${incomingCall.fromUserId} vous appelle`}</p>
           </div>
           <div className="row">
             <button
@@ -283,7 +283,7 @@ export default function SecurityShell({ userId, children }: Props) {
                 window.location.href = `/call?target=${encodeURIComponent(fromUserId)}&autocall=0&autoaccept=1&invite=${encodeURIComponent(inviteId)}`;
               }}
             >
-              Repondre
+              Répondre
             </button>
             <button type="button" className="ghost-secondary" onClick={() => setIncomingCall(null)}>
               Ignorer

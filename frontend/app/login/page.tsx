@@ -22,11 +22,11 @@ export default function LoginPage() {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!userId) {
-      setError('Identifiant invalide. Format: 3-24 caracteres [a-z0-9_-].');
+      setError('Identifiant invalide. Format : 3-24 caractères [a-z0-9_-].');
       return;
     }
     if (password.length < 6) {
-      setError('Mot de passe trop court (6 caracteres minimum).');
+      setError('Mot de passe trop court (6 caractères minimum).');
       return;
     }
 
@@ -91,17 +91,17 @@ export default function LoginPage() {
       if (message.includes('invalid credentials')) {
         setError('Identifiants invalides.');
       } else if (message.includes('already exists')) {
-        setError('Cet identifiant existe deja. Connectez-vous.');
+        setError('Cet identifiant existe déjà. Connectez-vous.');
       } else if (message.includes('relation') && message.includes('app_user')) {
-        setError('Schema Supabase non initialise. Execute le fichier supabase/schema.sql dans SQL Editor.');
+        setError('Schéma Supabase non initialisé. Exécute le fichier supabase/schema.sql dans SQL Editor.');
       } else if (message.includes('row-level security')) {
-        setError('RLS bloque l\'operation. Applique le schema SQL fourni ou des policies autorisant l\'insert/select.');
+        setError('RLS bloque l\'opération. Applique le schéma SQL fourni ou des policies autorisant l\'insert/select.');
       } else if (message.includes('invalid api key') || message.includes('jwt')) {
-        setError('Cle Supabase invalide. Verifie NEXT_PUBLIC_SUPABASE_ANON_KEY.');
+        setError('Clé Supabase invalide. Vérifie NEXT_PUBLIC_SUPABASE_ANON_KEY.');
       } else if (message.includes('missing env')) {
-        setError('Variables manquantes. Verifie NEXT_PUBLIC_API_BASE_URL.');
+        setError('Variables manquantes. Vérifie NEXT_PUBLIC_API_BASE_URL.');
       } else if (message.includes('failed to fetch')) {
-        setError(`API backend indisponible. Detail: ${raw}`);
+        setError(`API backend indisponible. Détail : ${raw}`);
       } else {
         setError(`Impossible de continuer: ${raw}`);
       }
@@ -119,8 +119,8 @@ export default function LoginPage() {
           </div>
           <p className="kicker">Ghost Secure</p>
         </div>
-        <h1>Connexion securisee</h1>
-        <p className="muted-text">Messagerie E2EE avec session token et transport temps reel.</p>
+        <h1>Connexion sécurisée</h1>
+        <p className="muted-text">Messagerie E2EE avec session token et transport temps réel.</p>
 
         <div className="segmented">
           <button
@@ -159,16 +159,16 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="6 caracteres minimum"
+              placeholder="6 caractères minimum"
               minLength={6}
             />
           </label>
 
-          <p className="user-id">ID normalise: {userId || '...'}</p>
+          <p className="user-id">ID normalisé : {userId || '...'}</p>
           <button type="submit" className="glass-btn primary" disabled={loading}>
             {loading ? (
               <span className="btn-content"><span className="spinner" /> Traitement</span>
-            ) : mode === 'register' ? "Creer le compte" : 'Se connecter'}
+            ) : mode === 'register' ? "Créer le compte" : 'Se connecter'}
           </button>
         </form>
 

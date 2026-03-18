@@ -112,7 +112,7 @@ export default function ConversationPage() {
             id: m.id,
             senderId: m.senderId ?? 'unknown',
             kind: 'text' as const,
-            text: '\u{1F512} Message chiffre (indechiffrable)',
+            text: '\u{1F512} Message chiffré (indéchiffrable)',
             createdAt: m.createdAt,
             expiresAt: m.expiresAt,
           } satisfies DecryptedMessage;
@@ -226,7 +226,7 @@ export default function ConversationPage() {
         if (frame.status === 'rejected' || frame.status === 'ended' || frame.status === 'accepted') {
           if (inviteId) dismissedCallInvitesRef.current.add(inviteId);
           setIncomingCallFrom(null);
-          setStatus('Vu recemment');
+          setStatus('Vu récemment');
         }
       })
       .subscribe();
@@ -332,7 +332,7 @@ export default function ConversationPage() {
       }
     } catch (err) {
       setInput(text);
-      setError(normalizeError(err, 'Message non envoye'));
+      setError(normalizeError(err, 'Message non envoyé'));
     }
   };
 
@@ -340,7 +340,7 @@ export default function ConversationPage() {
     if (recording || !session) return;
     try {
       if (typeof MediaRecorder === 'undefined') {
-        setError('Vocal non supporte sur ce navigateur');
+        setError('Vocal non supporté sur ce navigateur');
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -410,7 +410,7 @@ export default function ConversationPage() {
       const duration = Math.max(800, Date.now() - recordStartRef.current);
       await prepareVoiceDraft(blob, duration, 'natural');
     } catch {
-      setError('Erreur de preparation du vocal');
+      setError('Erreur de préparation du vocal');
     } finally {
       cleanupVoiceRecorder();
     }
@@ -462,7 +462,7 @@ export default function ConversationPage() {
         setMessages((prev) => sortAndDedupe([...prev, decrypted]));
       }
     } catch (err) {
-      setError(normalizeError(err, "Erreur envoi piece jointe"));
+      setError(normalizeError(err, "Erreur envoi pièce jointe"));
     }
   };
 
@@ -505,7 +505,7 @@ export default function ConversationPage() {
             discardDraftVoice();
             void startVoiceRecording();
           }}
-          aria-label="Reenregistrer vocal"
+          aria-label="Réenregistrer vocal"
         >
           <RedoIcon />
         </button>
@@ -522,7 +522,7 @@ export default function ConversationPage() {
           }
           void startVoiceRecording();
         }}
-        aria-label={recording ? 'Arreter enregistrement' : 'Demarrer vocal'}
+        aria-label={recording ? 'Arrêter enregistrement' : 'Démarrer vocal'}
       >
         {recording ? <StopIcon /> : <MicIcon />}
       </button>
@@ -590,7 +590,7 @@ export default function ConversationPage() {
               type="button"
               className="icon-btn"
               onClick={() => setSettingsOpen(true)}
-              aria-label="Parametres de la conversation"
+              aria-label="Paramètres de la conversation"
             >
               <TuneIcon />
             </button>
@@ -614,12 +614,12 @@ export default function ConversationPage() {
               className="ghost-secondary"
               onClick={async () => {
                 if (!session) return;
-                const nextUserId = window.prompt('ID utilisateur a ajouter au groupe');
+                const nextUserId = window.prompt('ID utilisateur à ajouter au groupe');
                 if (!nextUserId?.trim()) return;
                 try {
                   await addGroupMember(session, conversationId, nextUserId.trim());
                   await loadContext(session);
-                  setStatus(`${nextUserId.trim().toLowerCase()} ajoute au groupe`);
+                  setStatus(`${nextUserId.trim().toLowerCase()} ajouté au groupe`);
                 } catch (err) {
                   setError(normalizeError(err, 'Erreur ajout membre'));
                 }
@@ -649,7 +649,7 @@ export default function ConversationPage() {
 
         {incomingCallFrom && (
           <div className="incoming-banner">
-            <p>{preferences.hideCallerIdentity ? 'Appel entrant securise' : `${incomingCallFrom} vous appelle`}</p>
+            <p>{preferences.hideCallerIdentity ? 'Appel entrant sécurisé' : `${incomingCallFrom} vous appelle`}</p>
             <button
               type="button"
               className="ghost-primary"
@@ -658,7 +658,7 @@ export default function ConversationPage() {
                 router.push(`/call?target=${encodeURIComponent(incomingCallFrom)}&autocall=0`);
               }}
             >
-              Repondre
+              Répondre
             </button>
           </div>
         )}
@@ -667,7 +667,7 @@ export default function ConversationPage() {
           {messages.length === 0 && (
             <div className="conv-empty">
               <p>Aucun message</p>
-              <p>Demarrez la conversation</p>
+              <p>Démarrez la conversation</p>
             </div>
           )}
 
@@ -758,8 +758,8 @@ export default function ConversationPage() {
         {settingsOpen && (
           <div className="sheet-backdrop" onClick={() => setSettingsOpen(false)}>
             <section className="sheet" onClick={(event) => event.stopPropagation()}>
-              <h2>Parametres de la discussion</h2>
-              <p className="muted-text">Le timer choisi s applique aux prochains messages de cette conversation.</p>
+              <h2>Paramètres de la discussion</h2>
+              <p className="muted-text">Le timer choisi s'applique aux prochains messages de cette conversation.</p>
               <div className="settings-chip-row">
                 {DISAPPEARING_OPTIONS.map((option) => (
                   <button
@@ -776,9 +776,9 @@ export default function ConversationPage() {
                         if (detailRef.current) {
                           detailRef.current = { ...detailRef.current, disappearingTimerSeconds: result.disappearingTimerSeconds };
                         }
-                        setStatus(`Messages ephemeres: ${describeDisappearingTimer(result.disappearingTimerSeconds)}`);
+                        setStatus(`Messages éphémères : ${describeDisappearingTimer(result.disappearingTimerSeconds)}`);
                       } catch (err) {
-                        setError(normalizeError(err, 'Erreur mise a jour conversation'));
+                        setError(normalizeError(err, 'Erreur mise à jour conversation'));
                       } finally {
                         setSettingsSaving(false);
                       }
@@ -836,9 +836,9 @@ function buildSenderMessage(sent: EncryptedMessage, senderId: string, plaintext:
 function normalizeError(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
   const message = err.message.toLowerCase();
-  if (message.includes('forbidden')) return 'Action non autorisee.';
+  if (message.includes('forbidden')) return 'Action non autorisée.';
   if (message.includes('internal server error')) return 'Chargement temporairement indisponible.';
-  if (message.includes('failed to fetch')) return 'Hors ligne. Reessayez.';
+  if (message.includes('failed to fetch')) return 'Hors ligne. Réessayez.';
   return fallback;
 }
 

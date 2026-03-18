@@ -122,7 +122,7 @@ export function useGhostPreferences(): GhostPreferences {
 }
 
 export function describeDisappearingTimer(value: GhostPreferences['disappearingTimerSeconds']): string {
-  if (value === 0) return 'Desactives';
+  if (value === 0) return 'Désactivés';
   if (value === 1800) return '30 min';
   if (value === 3600) return '1 heure';
   if (value === 86400) return '24 heures';

@@ -125,9 +125,9 @@ export default function CallPage() {
       ? 'En appel'
       : live.callActive
         ? 'Connexion audio'
-        : 'Pret';
+        : 'Prêt';
 
-  const stageStatus = live.connected ? 'Canal audio securise actif' : live.statusText;
+  const stageStatus = live.connected ? 'Canal audio sécurisé actif' : live.statusText;
 
   const goToConversation = async () => {
     const session = getSession();
@@ -155,7 +155,7 @@ export default function CallPage() {
         <header className="mobile-header">
           <div>
             <h1>Appels</h1>
-            <p className="muted-text">{hasTarget ? 'Interface d appel active' : 'Historique securise'}</p>
+            <p className="muted-text">{hasTarget ? 'Interface d\'appel active' : 'Historique sécurisé'}</p>
           </div>
         </header>
 
@@ -191,8 +191,8 @@ export default function CallPage() {
             <div className="call-mask-card">
               <div className="call-mask-head">
                 <div>
-                  <strong>Voix masquee</strong>
-                  <p className="muted-text">Claire, mais plus difficile a reconnaitre.</p>
+                  <strong>Voix masquée</strong>
+                  <p className="muted-text">Claire, mais plus difficile à reconnaître.</p>
                 </div>
                 <span className="secure-badge">{live.voiceMaskAmount}%</span>
               </div>
@@ -224,7 +224,7 @@ export default function CallPage() {
                   }}
                 >
                   <PhoneIcon />
-                  <span>Repondre</span>
+                  <span>Répondre</span>
                 </button>
                 <button
                   type="button"
@@ -265,7 +265,7 @@ export default function CallPage() {
               <div className="empty-state-icon" aria-hidden="true">
                 <PhoneIcon />
               </div>
-              <p>Aucun appel recent</p>
+              <p>Aucun appel récent</p>
             </div>
           ) : (
             historyRows.map((item) => (

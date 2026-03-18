@@ -5,11 +5,11 @@ import { useRouter } from 'next/navigation';
 import { getSession } from '@/lib/session';
 
 const STEPS = [
-  { label: 'Securisation de votre IP', icon: 'shield' },
-  { label: 'Chiffrement des donnees', icon: 'lock' },
-  { label: 'Generation des cles E2E', icon: 'key' },
-  { label: 'Connexion au serveur securise', icon: 'server' },
-  { label: 'Session protegee', icon: 'check' },
+  { label: 'Sécurisation de votre IP', icon: 'shield' },
+  { label: 'Chiffrement des données', icon: 'lock' },
+  { label: 'Génération des clés E2E', icon: 'key' },
+  { label: 'Connexion au serveur sécurisé', icon: 'server' },
+  { label: 'Session protégée', icon: 'check' },
 ];
 
 const STEP_DURATION = 900;
@@ -79,7 +79,7 @@ export default function SecurePage() {
           <div className="secure-progress-bar" style={{ width: `${progress}%` }} />
         </div>
 
-        {done && <p className="secure-ready">Pret</p>}
+        {done && <p className="secure-ready">Prêt</p>}
       </div>
     </main>
   );

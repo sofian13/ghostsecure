@@ -14,7 +14,7 @@ type TabItem = {
 const tabs: TabItem[] = [
   { key: 'chats', label: 'Chats', href: '/chat', icon: 'chat' },
   { key: 'calls', label: 'Appels', href: '/call', icon: 'call' },
-  { key: 'settings', label: 'Parametres', href: '/settings', icon: 'settings' },
+  { key: 'settings', label: 'Paramètres', href: '/settings', icon: 'settings' },
 ];
 
 function isActive(pathname: string, item: TabItem): boolean {

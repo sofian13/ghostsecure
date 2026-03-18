@@ -70,7 +70,7 @@ export default function ChatListPage() {
 
     for (const conv of rows.slice(PREVIEW_FETCH_LIMIT)) {
       next[conv.id] = previewsRef.current[conv.id] ?? {
-        text: conv.kind === 'group' ? `Groupe - ${conv.memberCount} membres` : 'Conversation securisee',
+        text: conv.kind === 'group' ? `Groupe - ${conv.memberCount} membres` : 'Conversation sécurisée',
         at: conv.updatedAt,
       };
     }
@@ -81,12 +81,12 @@ export default function ChatListPage() {
           const encrypted = await fetchMessages(s, conv.id, 1);
           const last = encrypted[encrypted.length - 1];
           if (!last) {
-            return [conv.id, { text: 'Nouveau chat securise', at: conv.updatedAt }] as const;
+            return [conv.id, { text: 'Nouveau chat sécurisé', at: conv.updatedAt }] as const;
           }
           const dec = await decryptForUser(s.userId, last, conv.id);
-          return [conv.id, { text: preferences.hideMessagePreviews ? 'Apercu masque' : previewLabel(dec), at: last.createdAt }] as const;
+          return [conv.id, { text: preferences.hideMessagePreviews ? 'Aperçu masqué' : previewLabel(dec), at: last.createdAt }] as const;
         } catch {
-          return [conv.id, { text: 'Message chiffre', at: conv.updatedAt }] as const;
+          return [conv.id, { text: 'Message chiffré', at: conv.updatedAt }] as const;
         }
       })
     );
@@ -176,7 +176,7 @@ export default function ChatListPage() {
           .map((id) => id.trim().toLowerCase())
           .filter((id) => id !== '');
         const conv = await createGroupConversation(session, groupTitle, members);
-        setFriendStatus(`Groupe ${groupTitle.trim()} cree`);
+        setFriendStatus(`Groupe ${groupTitle.trim()} créé`);
         setGroupTitle('');
         setGroupMembers('');
         setSheetOpen(false);
@@ -187,7 +187,7 @@ export default function ChatListPage() {
 
       if (!peerUserId.trim()) return;
       await sendFriendRequest(session, peerUserId.trim());
-      setFriendStatus(`Demande envoyee a ${peerUserId.trim().toLowerCase()}`);
+      setFriendStatus(`Demande envoyée à ${peerUserId.trim().toLowerCase()}`);
       setPeerUserId('');
       setSheetMode('direct');
       setSheetOpen(false);
@@ -242,7 +242,7 @@ export default function ChatListPage() {
             <h1>Ghost Secure</h1>
             <p className="muted-text">Discussions</p>
           </div>
-          <button type="button" className="icon-btn" onClick={() => router.push('/settings')} aria-label="Parametres">
+          <button type="button" className="icon-btn" onClick={() => router.push('/settings')} aria-label="Paramètres">
             <SettingsGearIcon />
           </button>
         </header>
@@ -278,9 +278,9 @@ export default function ChatListPage() {
           </section>
         )}
 
-        <section className="chat-section-head whatsapp-section-head" aria-label="Resume conversations">
+        <section className="chat-section-head whatsapp-section-head" aria-label="Résumé conversations">
           <div>
-            <p className="section-title">Recents</p>
+            <p className="section-title">Récents</p>
             <strong>{filteredConversations.length} chat{filteredConversations.length > 1 ? 's' : ''}</strong>
           </div>
           {search.trim() && <span className="chat-filter-pill">Filtre actif</span>}
@@ -331,9 +331,9 @@ export default function ChatListPage() {
                       <span>{formatHour(preview?.at ?? conv.updatedAt)}</span>
                     </div>
                     <div className="chat-bottomline">
-                      <p>{isGroup ? `Groupe · ${conv.memberCount} membres` : preview?.text ?? 'Message chiffre'}</p>
+                      <p>{isGroup ? `Groupe · ${conv.memberCount} membres` : preview?.text ?? 'Message chiffré'}</p>
                       <span className={`chat-kind-pill ${isGroup ? 'group' : 'direct'}`}>
-                        {isGroup ? 'Groupe' : 'Prive'}
+                        {isGroup ? 'Groupe' : 'Privé'}
                       </span>
                     </div>
                   </div>
@@ -389,7 +389,7 @@ export default function ChatListPage() {
                     />
                   </label>
                   <label className="field">
-                    <span>Membres (IDs, separes par virgule)</span>
+                    <span>Membres (IDs, séparés par virgule)</span>
                     <input
                       className="mobile-input"
                       value={groupMembers}
@@ -404,7 +404,7 @@ export default function ChatListPage() {
                   Annuler
                 </button>
                 <button type="submit" className="ghost-primary">
-                  {sheetMode === 'group' ? 'Creer' : 'Envoyer'}
+                  {sheetMode === 'group' ? 'Créer' : 'Envoyer'}
                 </button>
               </div>
             </form>
@@ -428,10 +428,10 @@ function normalizeError(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
   const raw = err.message.trim();
   const message = raw.toLowerCase();
-  if (message.includes('forbidden')) return 'Action non autorisee.';
+  if (message.includes('forbidden')) return 'Action non autorisée.';
   if (message.includes('invalid') || message.includes('introuvable')) return raw;
   if (message.includes('network error calling')) return raw;
-  if (message.includes('failed to fetch')) return `Connexion backend indisponible. Detail: ${raw}`;
+  if (message.includes('failed to fetch')) return `Connexion backend indisponible. Détail : ${raw}`;
   return fallback;
 }
 
