@@ -84,7 +84,7 @@ export default function LoginPage() {
       }
 
       setSession(session);
-      router.replace('/chat');
+      router.replace('/secure');
     } catch (err) {
       const raw = err instanceof Error ? err.message : 'Erreur inconnue';
       const message = raw.toLowerCase();
