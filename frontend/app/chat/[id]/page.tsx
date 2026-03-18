@@ -377,7 +377,15 @@ export default function ConversationPage() {
     try {
       const blob = await new Promise<Blob>((resolve, reject) => {
         const rec = recorderRef.current!;
-        const timeout = window.setTimeout(() => reject(new Error('recording timeout')), 4000);
+        const timeout = window.setTimeout(() => {
+          // Timeout fallback: use whatever chunks we already have
+          const result = new Blob(recordChunksRef.current, { type: rec.mimeType || 'audio/webm' });
+          if (result.size > 0) {
+            resolve(result);
+          } else {
+            reject(new Error('recording timeout'));
+          }
+        }, 8000);
         rec.onstop = () => {
           window.clearTimeout(timeout);
           const result = new Blob(recordChunksRef.current, { type: rec.mimeType || 'audio/webm' });
@@ -391,8 +399,12 @@ export default function ConversationPage() {
           window.clearTimeout(timeout);
           reject(new Error('recording failed'));
         };
+        // Flush pending data, then wait briefly for mobile browsers to deliver
+        // the final chunk before stopping the recorder.
         rec.requestData();
-        rec.stop();
+        window.setTimeout(() => {
+          try { rec.stop(); } catch { /* already stopped */ }
+        }, 300);
       });
 
       const duration = Math.max(800, Date.now() - recordStartRef.current);
@@ -652,9 +664,6 @@ export default function ConversationPage() {
         )}
 
         <section className="message-thread" ref={listRef}>
-          <div className="security-pill">Chiffrement de bout en bout active</div>
-          <div className="security-pill secondary">Messages ephemeres: {describeDisappearingTimer(conversationTimer)}</div>
-
           {messages.length === 0 && (
             <div className="conv-empty">
               <p>Aucun message</p>

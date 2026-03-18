@@ -12,12 +12,6 @@ import { clearSession, getSession } from '@/lib/session';
 
 type ThemeMode = 'dark' | 'light';
 
-const AUTO_LOCK_OPTIONS: Array<{ value: 0 | 15 | 60; label: string }> = [
-  { value: 0, label: 'Instant' },
-  { value: 15, label: '15 s' },
-  { value: 60, label: '60 s' },
-];
-
 const DISAPPEARING_OPTIONS: Array<{ value: 0 | 1800 | 3600 | 86400 | 604800; label: string }> = [
   { value: 0, label: 'Off' },
   { value: 1800, label: '30 min' },
@@ -114,12 +108,6 @@ export default function SettingsPage() {
               <p className="muted-text">@{userId}</p>
             </div>
           </div>
-          <div className="secure-chip-row">
-            <span className="secure-chip">E2E</span>
-            <span className="secure-chip">Sealed sender</span>
-            <span className="secure-chip">{describeDisappearingTimer(preferences.disappearingTimerSeconds)}</span>
-            <span className="secure-chip">Voix masquee</span>
-          </div>
           {saved && <p className="ok-text">{saved}</p>}
         </section>
 
@@ -150,23 +138,6 @@ export default function SettingsPage() {
             />
           </div>
 
-          <div className="pref-group">
-            <div className="pref-group-label">
-              <strong>Verrouillage auto apres sortie</strong>
-            </div>
-            <div className="settings-chip-row">
-              {AUTO_LOCK_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`settings-chip ${preferences.autoLockDelaySeconds === option.value ? 'active' : ''}`}
-                  onClick={() => updatePreference('autoLockDelaySeconds', option.value, 'Delai de verrouillage mis a jour')}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
         </section>
 
         <section className="inline-card">

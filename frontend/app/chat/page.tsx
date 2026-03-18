@@ -15,7 +15,7 @@ import {
   type FriendRequest,
 } from '@/lib/api';
 import { decryptForUser, previewLabel } from '@/lib/messages';
-import { describeDisappearingTimer, useGhostPreferences } from '@/lib/preferences';
+import { useGhostPreferences } from '@/lib/preferences';
 import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
 import type { Conversation, Session } from '@/types';
@@ -247,14 +247,7 @@ export default function ChatListPage() {
           </button>
         </header>
 
-        <section className="chat-top-strip" aria-label="Etat securite">
-          <span className="chat-top-pill strong">Prive</span>
-          <span className="chat-top-pill">E2E</span>
-          <span className="chat-top-pill">{preferences.hideMessagePreviews ? 'Apercus masques' : 'Apercus visibles'}</span>
-          <span className="chat-top-pill">Disparition {describeDisappearingTimer(preferences.disappearingTimerSeconds)}</span>
-        </section>
-
-        <div className="sticky-search">
+<div className="sticky-search">
           <div className="search-wrap">
             <SearchIcon />
             <input

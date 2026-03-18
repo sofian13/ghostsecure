@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase';
 import { useGhostPreferences } from '@/lib/preferences';
 
@@ -254,7 +254,6 @@ export default function SecurityShell({ userId, children }: Props) {
     };
   }, [preferences.hideCallerIdentity, userId]);
 
-  const wm = useMemo(() => `ghost:${userId.slice(0, 8)}`, [userId]);
   const isMasked = hidden || manualLock;
 
   return (
@@ -267,27 +266,6 @@ export default function SecurityShell({ userId, children }: Props) {
       onDragStart={(e) => e.preventDefault()}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="watermark">{wm}</div>
-      <div className="watermark-grid" aria-hidden="true">
-        <span>{wm}</span>
-        <span>{wm}</span>
-        <span>{wm}</span>
-        <span>{wm}</span>
-      </div>
-      {isMasked && (
-        <div className="privacy-mask">
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={() => {
-              setHidden(false);
-              setManualLock(false);
-            }}
-          >
-            Unlock secure view
-          </button>
-        </div>
-      )}
       {captureAlert && <div className="capture-alert">Capture detectee. Affichage masque.</div>}
       {incomingCall && (
         <div className="incoming-popup" role="alert" aria-live="assertive">
@@ -313,9 +291,6 @@ export default function SecurityShell({ userId, children }: Props) {
           </div>
         </div>
       )}
-      <button type="button" className="ghost-btn lock-toggle" onClick={() => setManualLock((v) => !v)}>
-        {manualLock ? 'Unlock' : 'Lock'}
-      </button>
       <div className={isMasked ? 'blurred' : ''}>{children}</div>
     </div>
   );
