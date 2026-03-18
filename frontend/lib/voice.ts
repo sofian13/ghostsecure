@@ -1,70 +1,6 @@
 "use client";
 
-export type VoicePresetId = 'natural' | 'ghost' | 'radio' | 'vault';
-
-export type VoicePreset = {
-  id: VoicePresetId;
-  label: string;
-  emoji: string;
-  description: string;
-};
-
 const WAV_MIME = 'audio/wav';
-
-export const VOICE_PRESETS: VoicePreset[] = [
-  { id: 'natural', label: 'Naturelle', emoji: 'N', description: 'Aucun filtre, rendu brut.' },
-  { id: 'ghost', label: 'Fantome', emoji: 'G', description: 'Plus aerien et masque.' },
-  { id: 'radio', label: 'Radio', emoji: 'R', description: 'Bande etroite, type talkie.' },
-  { id: 'vault', label: 'Coffre', emoji: 'C', description: 'Plus dense et mecanique.' },
-];
-
-type PresetConfig = {
-  highpass: number;
-  lowpass: number;
-  peakingFrequency: number;
-  peakingGain: number;
-  peakingQ: number;
-  distortion: number;
-  tremoloHz: number;
-  tremoloDepth: number;
-  outputGain: number;
-};
-
-const PRESET_CONFIG: Record<Exclude<VoicePresetId, 'natural'>, PresetConfig> = {
-  ghost: {
-    highpass: 180,
-    lowpass: 2800,
-    peakingFrequency: 2200,
-    peakingGain: -5,
-    peakingQ: 1.2,
-    distortion: 24,
-    tremoloHz: 7,
-    tremoloDepth: 0.025,
-    outputGain: 0.96,
-  },
-  radio: {
-    highpass: 420,
-    lowpass: 2100,
-    peakingFrequency: 1400,
-    peakingGain: 4,
-    peakingQ: 1.8,
-    distortion: 16,
-    tremoloHz: 0,
-    tremoloDepth: 0,
-    outputGain: 0.92,
-  },
-  vault: {
-    highpass: 120,
-    lowpass: 1850,
-    peakingFrequency: 780,
-    peakingGain: 6,
-    peakingQ: 0.9,
-    distortion: 30,
-    tremoloHz: 4,
-    tremoloDepth: 0.015,
-    outputGain: 0.98,
-  },
-};
 
 function createDistortionCurve(amount: number): Float32Array {
   const k = Math.max(0, amount);
@@ -153,71 +89,64 @@ async function decodeBlob(blob: Blob): Promise<AudioBuffer> {
   }
 }
 
-export async function transformVoiceBlob(blob: Blob, presetId: VoicePresetId): Promise<Blob> {
-  if (presetId === 'natural') {
-    return blob;
-  }
-
+/**
+ * Transform a voice blob to the deepest/gravest voice possible.
+ * Uses aggressive lowpass, pitch-shifting formant, and bass boost.
+ */
+export async function transformVoiceBlob(blob: Blob): Promise<Blob> {
   const buffer = await decodeBlob(blob);
-  const config = PRESET_CONFIG[presetId];
-  const context = new OfflineAudioContext(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+
+  // Resample at lower rate to pitch-shift down (makes voice much deeper)
+  const pitchFactor = 0.65;
+  const newLength = Math.round(buffer.length / pitchFactor);
+  const context = new OfflineAudioContext(buffer.numberOfChannels, newLength, buffer.sampleRate);
   const source = context.createBufferSource();
   source.buffer = buffer;
+  source.playbackRate.value = pitchFactor;
 
-  const highpass = context.createBiquadFilter();
-  highpass.type = 'highpass';
-  highpass.frequency.value = config.highpass;
-
+  // Heavy lowpass to cut highs and keep only deep tones
   const lowpass = context.createBiquadFilter();
   lowpass.type = 'lowpass';
-  lowpass.frequency.value = config.lowpass;
-  lowpass.Q.value = 0.8;
+  lowpass.frequency.value = 1800;
+  lowpass.Q.value = 0.6;
 
-  const peaking = context.createBiquadFilter();
-  peaking.type = 'peaking';
-  peaking.frequency.value = config.peakingFrequency;
-  peaking.gain.value = config.peakingGain;
-  peaking.Q.value = config.peakingQ;
+  // Highpass to remove rumble
+  const highpass = context.createBiquadFilter();
+  highpass.type = 'highpass';
+  highpass.frequency.value = 80;
 
+  // Bass boost
+  const bass = context.createBiquadFilter();
+  bass.type = 'peaking';
+  bass.frequency.value = 200;
+  bass.gain.value = 8;
+  bass.Q.value = 0.8;
+
+  // Compressor to keep it even
   const compressor = context.createDynamicsCompressor();
-  compressor.threshold.value = -24;
-  compressor.knee.value = 12;
-  compressor.ratio.value = 10;
+  compressor.threshold.value = -20;
+  compressor.knee.value = 10;
+  compressor.ratio.value = 12;
   compressor.attack.value = 0.003;
-  compressor.release.value = 0.16;
+  compressor.release.value = 0.15;
 
+  // Mild distortion for texture
   const shaper = context.createWaveShaper();
-  shaper.curve = createDistortionCurve(config.distortion);
+  shaper.curve = createDistortionCurve(20);
   shaper.oversample = '4x';
 
   const output = context.createGain();
-  output.gain.value = config.outputGain;
+  output.gain.value = 0.95;
 
   source.connect(highpass);
   highpass.connect(lowpass);
-  lowpass.connect(peaking);
-  peaking.connect(compressor);
+  lowpass.connect(bass);
+  bass.connect(compressor);
   compressor.connect(shaper);
-
-  if (config.tremoloHz > 0 && config.tremoloDepth > 0) {
-    const tremolo = context.createGain();
-    tremolo.gain.value = 1 - config.tremoloDepth;
-    const lfo = context.createOscillator();
-    const lfoDepth = context.createGain();
-    lfo.type = 'triangle';
-    lfo.frequency.value = config.tremoloHz;
-    lfoDepth.gain.value = config.tremoloDepth;
-    lfo.connect(lfoDepth);
-    lfoDepth.connect(tremolo.gain);
-    shaper.connect(tremolo);
-    tremolo.connect(output);
-    lfo.start(0);
-  } else {
-    shaper.connect(output);
-  }
-
+  shaper.connect(output);
   output.connect(context.destination);
   source.start(0);
+
   const rendered = await context.startRendering();
   return encodeWav(rendered);
 }

@@ -98,8 +98,8 @@ class CallSessionManager {
   private state: CallSessionSnapshot = {
     targetId: '',
     connected: false,
-    voiceMaskAmount: 58,
-    statusText: 'Pret',
+    voiceMaskAmount: 85,
+    statusText: 'Prêt',
     speakerOn: false,
     callActive: false,
   };

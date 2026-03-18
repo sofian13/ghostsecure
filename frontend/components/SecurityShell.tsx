@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase';
 import { useGhostPreferences } from '@/lib/preferences';
 
@@ -11,74 +11,8 @@ type Props = {
 
 export default function SecurityShell({ userId, children }: Props) {
   const preferences = useGhostPreferences();
-  const [hidden, setHidden] = useState(false);
-  const [manualLock, setManualLock] = useState(false);
   const [captureAlert, setCaptureAlert] = useState(false);
   const [incomingCall, setIncomingCall] = useState<{ inviteId: string; fromUserId: string } | null>(null);
-  const blurTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const scheduleLock = () => {
-      if (blurTimerRef.current) window.clearTimeout(blurTimerRef.current);
-      const delayMs = preferences.autoLockDelaySeconds * 1000;
-      if (delayMs === 0) {
-        setHidden(true);
-        return;
-      }
-      blurTimerRef.current = window.setTimeout(() => setHidden(true), delayMs);
-    };
-    const cancelScheduledLock = () => {
-      if (blurTimerRef.current) window.clearTimeout(blurTimerRef.current);
-      blurTimerRef.current = null;
-    };
-    const lock = () => scheduleLock();
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        cancelScheduledLock();
-        setHidden(false);
-        return;
-      }
-      scheduleLock();
-    };
-    const onBlur = () => scheduleLock();
-    const onFocus = () => {
-      cancelScheduledLock();
-      setHidden(document.visibilityState !== 'visible');
-    };
-    const onPageHide = () => scheduleLock();
-    const onResize = () => scheduleLock();
-    const onKeyDown = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      const blockedCombo = (event.ctrlKey || event.metaKey) && ['c', 'v', 'x', 'p', 's'].includes(key);
-      if (blockedCombo) event.preventDefault();
-      if (key === 'printscreen' || ((event.metaKey || event.ctrlKey) && event.shiftKey && ['3', '4', '5'].includes(key))) {
-        setHidden(true);
-        setCaptureAlert(true);
-        window.setTimeout(() => setCaptureAlert(false), 1800);
-      }
-    };
-
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('blur', onBlur);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('pagehide', onPageHide);
-    window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', onResize);
-    window.addEventListener('beforeprint', lock);
-    window.addEventListener('keydown', onKeyDown);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('blur', onBlur);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('pagehide', onPageHide);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('orientationchange', onResize);
-      window.removeEventListener('beforeprint', lock);
-      window.removeEventListener('keydown', onKeyDown);
-      cancelScheduledLock();
-    };
-  }, [preferences.autoLockDelaySeconds]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return;
@@ -122,7 +56,7 @@ export default function SecurityShell({ userId, children }: Props) {
     const nav = navigator as Navigator & { wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> } };
 
     const requestWakeLock = async () => {
-      if (!preferences.keepScreenAwake || !nav.wakeLock || document.visibilityState !== 'visible' || hidden || manualLock) return;
+      if (!preferences.keepScreenAwake || !nav.wakeLock || document.visibilityState !== 'visible') return;
       try {
         wakeLock = await nav.wakeLock.request('screen');
       } catch {
@@ -141,7 +75,7 @@ export default function SecurityShell({ userId, children }: Props) {
     };
 
     const onVisibility = async () => {
-      if (document.visibilityState === 'visible' && !hidden && !manualLock) {
+      if (document.visibilityState === 'visible') {
         await requestWakeLock();
       } else {
         await releaseWakeLock();
@@ -155,7 +89,7 @@ export default function SecurityShell({ userId, children }: Props) {
       document.removeEventListener('visibilitychange', onVisibility);
       void releaseWakeLock();
     };
-  }, [hidden, manualLock, preferences.keepScreenAwake]);
+  }, [preferences.keepScreenAwake]);
 
   useEffect(() => {
     const me = userId.trim().toLowerCase();
@@ -254,8 +188,6 @@ export default function SecurityShell({ userId, children }: Props) {
     };
   }, [preferences.hideCallerIdentity, userId]);
 
-  const isMasked = hidden || manualLock;
-
   return (
     <div
       className="security-shell"
@@ -291,7 +223,7 @@ export default function SecurityShell({ userId, children }: Props) {
           </div>
         </div>
       )}
-      <div className={isMasked ? 'blurred' : ''}>{children}</div>
+      <div>{children}</div>
     </div>
   );
 }

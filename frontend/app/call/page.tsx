@@ -191,23 +191,9 @@ export default function CallPage() {
             <div className="call-mask-card">
               <div className="call-mask-head">
                 <div>
-                  <strong>Voix masquée</strong>
-                  <p className="muted-text">Claire, mais plus difficile à reconnaître.</p>
+                  <strong>Voix grave activée</strong>
+                  <p className="muted-text">Votre voix est modifiée en temps réel.</p>
                 </div>
-                <span className="secure-badge">{live.voiceMaskAmount}%</span>
-              </div>
-              <input
-                className="settings-range"
-                type="range"
-                min="35"
-                max="85"
-                step="1"
-                value={live.voiceMaskAmount}
-                onChange={(e) => void callSession.setVoiceMaskAmount(Number(e.target.value))}
-              />
-              <div className="settings-range-legend">
-                <span>Plus naturel</span>
-                <span>Plus anonyme</span>
               </div>
             </div>
 

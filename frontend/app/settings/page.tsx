@@ -26,7 +26,6 @@ export default function SettingsPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [saved, setSaved] = useState<string | null>(null);
-  const [draftVoiceMaskAmount, setDraftVoiceMaskAmount] = useState(preferences.callVoiceMaskAmount);
   const savedTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -52,10 +51,6 @@ export default function SettingsPage() {
     }, 1800);
   };
 
-  useEffect(() => {
-    setDraftVoiceMaskAmount(preferences.callVoiceMaskAmount);
-  }, [preferences.callVoiceMaskAmount]);
-
   useEffect(() => () => {
     if (savedTimerRef.current) window.clearTimeout(savedTimerRef.current);
   }, []);
@@ -80,11 +75,6 @@ export default function SettingsPage() {
   const updatePreference = <K extends keyof typeof preferences>(key: K, value: (typeof preferences)[K], message: string) => {
     updateGhostPreferences({ [key]: value });
     flashSaved(message);
-  };
-
-  const commitVoiceMaskAmount = () => {
-    if (draftVoiceMaskAmount === preferences.callVoiceMaskAmount) return;
-    updatePreference('callVoiceMaskAmount', draftVoiceMaskAmount, 'Voix masquée ajustée');
   };
 
   if (!userId) return <main className="centered">Chargement...</main>;
@@ -161,34 +151,6 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <section className="inline-card">
-          <div className="settings-section-head">
-            <div>
-              <p className="section-title">Appels</p>
-              <strong>Une seule voix masquée, réglable</strong>
-            </div>
-          </div>
-          <label className="field">
-            <span>Niveau de masquage: {draftVoiceMaskAmount}%</span>
-            <input
-              className="settings-range"
-              type="range"
-              min="35"
-              max="85"
-              step="1"
-              value={draftVoiceMaskAmount}
-              onChange={(e) => setDraftVoiceMaskAmount(Number(e.target.value))}
-              onMouseUp={commitVoiceMaskAmount}
-              onTouchEnd={commitVoiceMaskAmount}
-              onKeyUp={commitVoiceMaskAmount}
-              onBlur={commitVoiceMaskAmount}
-            />
-          </label>
-          <div className="settings-range-legend">
-            <span>Plus naturel</span>
-            <span>Plus anonyme</span>
-          </div>
-        </section>
 
         <section className="inline-card">
           <p className="section-title">Affichage</p>

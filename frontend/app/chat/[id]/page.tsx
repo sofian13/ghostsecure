@@ -12,7 +12,7 @@ import { describeDisappearingTimer, useGhostPreferences } from '@/lib/preference
 import { hasRatchetSession, createOutboundSession, encryptRatchet } from '@/lib/ratchet';
 import { useRealtime } from '@/lib/useRealtime';
 import { getSupabaseClient } from '@/lib/supabase';
-import { type VoicePresetId, VOICE_PRESETS, transformVoiceBlob } from '@/lib/voice';
+import { transformVoiceBlob } from '@/lib/voice';
 import type { EncryptedMessage, Session } from '@/types';
 
 const MESSAGE_POLL_INTERVAL_MS = 1_500;
@@ -44,11 +44,9 @@ export default function ConversationPage() {
   const [recording, setRecording] = useState(false);
   const [recordingMs, setRecordingMs] = useState(0);
   const [draftVoiceUrl, setDraftVoiceUrl] = useState<string | null>(null);
-  const [draftVoiceSourceBlob, setDraftVoiceSourceBlob] = useState<Blob | null>(null);
   const [draftVoiceBlob, setDraftVoiceBlob] = useState<Blob | null>(null);
   const [draftVoiceMime, setDraftVoiceMime] = useState<string>('audio/webm');
   const [draftVoiceDurationMs, setDraftVoiceDurationMs] = useState(0);
-  const [draftVoicePreset, setDraftVoicePreset] = useState<VoicePresetId>('natural');
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const [conversationTimer, setConversationTimer] = useState<0 | 1800 | 3600 | 86400 | 604800>(preferences.disappearingTimerSeconds);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -408,7 +406,7 @@ export default function ConversationPage() {
       });
 
       const duration = Math.max(800, Date.now() - recordStartRef.current);
-      await prepareVoiceDraft(blob, duration, 'natural');
+      await prepareVoiceDraft(blob, duration);
     } catch {
       setError('Erreur de préparation du vocal');
     } finally {
@@ -469,11 +467,9 @@ export default function ConversationPage() {
   const discardDraftVoice = () => {
     if (draftVoiceUrl) URL.revokeObjectURL(draftVoiceUrl);
     setDraftVoiceUrl(null);
-    setDraftVoiceSourceBlob(null);
     setDraftVoiceBlob(null);
     setDraftVoiceDurationMs(0);
     setDraftVoiceMime('audio/webm');
-    setDraftVoicePreset('natural');
     setVoiceProcessing(false);
   };
 
@@ -546,14 +542,12 @@ export default function ConversationPage() {
 
   if (!session) return <main className="centered">Chargement...</main>;
 
-  async function prepareVoiceDraft(blob: Blob, durationMs: number, presetId: VoicePresetId) {
+  async function prepareVoiceDraft(blob: Blob, durationMs: number) {
     const taskId = Date.now();
     voiceDraftTaskRef.current = taskId;
     setVoiceProcessing(true);
-    setDraftVoiceSourceBlob(blob);
-    setDraftVoicePreset(presetId);
     try {
-      const processed = await transformVoiceBlob(blob, presetId);
+      const processed = await transformVoiceBlob(blob);
       if (voiceDraftTaskRef.current !== taskId) return;
       const nextUrl = URL.createObjectURL(processed);
       setDraftVoiceUrl((current) => {
@@ -695,25 +689,8 @@ export default function ConversationPage() {
           <section className="voice-draft">
             <audio controls preload="metadata" src={draftVoiceUrl} />
             <p className="muted-text">
-              Vocal: {Math.max(1, Math.round(draftVoiceDurationMs / 1000))}s · Voix {VOICE_PRESETS.find((preset) => preset.id === draftVoicePreset)?.label.toLowerCase()}
+              Vocal : {Math.max(1, Math.round(draftVoiceDurationMs / 1000))}s · Voix grave
             </p>
-            <div className="voice-presets">
-              {VOICE_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  className={`voice-preset-card ${draftVoicePreset === preset.id ? 'active' : ''}`}
-                  onClick={() => {
-                    if (!draftVoiceSourceBlob || voiceProcessing || draftVoicePreset === preset.id) return;
-                    void prepareVoiceDraft(draftVoiceSourceBlob, draftVoiceDurationMs, preset.id);
-                  }}
-                  disabled={voiceProcessing}
-                >
-                  <span className="preset-emoji" aria-hidden="true">{preset.emoji}</span>
-                  <span className="preset-label">{preset.label}</span>
-                </button>
-              ))}
-            </div>
             {voiceProcessing && <p className="muted-text">Traitement du vocal...</p>}
             <div className="row">
               <button type="button" className="ghost-secondary" onClick={discardDraftVoice}>

@@ -19,7 +19,7 @@ const DEFAULTS: GhostPreferences = {
   keepScreenAwake: true,
   autoLockDelaySeconds: 0,
   disappearingTimerSeconds: 3600,
-  callVoiceMaskAmount: 58,
+  callVoiceMaskAmount: 85,
 };
 
 let cachedPreferences: GhostPreferences = DEFAULTS;
